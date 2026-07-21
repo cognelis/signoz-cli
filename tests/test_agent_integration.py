@@ -36,8 +36,15 @@ class AgentIntegrationValidationTest(unittest.TestCase):
             ("missing name", lambda root: self.replace(root, "name: signoz-cli", "name:")),
             ("name mismatch", lambda root: self.replace(root, "name: signoz-cli", "name: other")),
             ("long description", self.long_description),
-            ("missing command", lambda root: self.replace(root, "signoz ", "observe ")),
-            ("forbidden key flag", lambda root: self.append_skill(root, "\nsignoz --api-key secret\n")),
+            ("missing command", lambda root: self.replace(root, "signoz-cli ", "observe ")),
+            (
+                "forbidden key flag",
+                lambda root: self.append_skill(root, "\nsignoz-cli --api-key secret\n"),
+            ),
+            (
+                "legacy command",
+                lambda root: self.append_skill(root, "\nsignoz version --output json\n"),
+            ),
             ("version mismatch", self.version_mismatch),
             ("missing target", self.missing_target),
             ("trigger overlap", self.trigger_overlap),

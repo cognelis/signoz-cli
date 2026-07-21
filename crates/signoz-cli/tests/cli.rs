@@ -18,7 +18,7 @@ fn version_is_independent_of_connection_configuration() {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("broken.toml");
     std::fs::write(&config, "not valid = [").unwrap();
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--output", "json", "version"])
         .env("SIGNOZ_CONFIG", config)
@@ -56,7 +56,7 @@ async fn metrics_list_emits_the_versioned_json_envelope() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -86,7 +86,7 @@ async fn metrics_list_reports_upstream_limit_as_potentially_incomplete() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -130,7 +130,7 @@ async fn unbounded_resource_lists_apply_exact_client_side_pagination() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -164,7 +164,7 @@ async fn empty_and_incompatible_list_shapes_are_distinguished() {
         })))
         .mount(&empty_server)
         .await;
-    let mut empty = Command::cargo_bin("signoz").unwrap();
+    let mut empty = Command::cargo_bin("signoz-cli").unwrap();
     empty
         .args([
             "--url",
@@ -187,7 +187,7 @@ async fn empty_and_incompatible_list_shapes_are_distinguished() {
         })))
         .mount(&view_server)
         .await;
-    let mut views = Command::cargo_bin("signoz").unwrap();
+    let mut views = Command::cargo_bin("signoz-cli").unwrap();
     views
         .args([
             "--url",
@@ -213,7 +213,7 @@ async fn empty_and_incompatible_list_shapes_are_distinguished() {
         })))
         .mount(&metrics_server)
         .await;
-    let mut metrics = Command::cargo_bin("signoz").unwrap();
+    let mut metrics = Command::cargo_bin("signoz-cli").unwrap();
     metrics
         .args([
             "--url",
@@ -237,7 +237,7 @@ async fn empty_and_incompatible_list_shapes_are_distinguished() {
         })))
         .mount(&drift_server)
         .await;
-    let mut drift = Command::cargo_bin("signoz").unwrap();
+    let mut drift = Command::cargo_bin("signoz-cli").unwrap();
     drift
         .args([
             "--url",
@@ -287,7 +287,7 @@ async fn metrics_query_resolves_aggregation_from_catalog_metadata() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -321,7 +321,7 @@ async fn metrics_top_exact_cap_reports_no_offset_pagination() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -361,7 +361,7 @@ async fn rule_history_uses_only_the_upstream_cursor_for_completeness() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -398,7 +398,7 @@ async fn rule_history_uses_only_the_upstream_cursor_for_completeness() {
         })))
         .mount(&complete_server)
         .await;
-    let mut complete = Command::cargo_bin("signoz").unwrap();
+    let mut complete = Command::cargo_bin("signoz-cli").unwrap();
     complete
         .args([
             "--url",
@@ -426,7 +426,7 @@ async fn unauthorized_is_json_on_stderr_and_never_leaks_the_key() {
         .respond_with(ResponseTemplate::new(401).set_body_string("denied"))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--url", &server.uri(), "--output", "json", "auth", "check"])
         .env("SIGNOZ_API_KEY", "never-print-this")
@@ -453,7 +453,7 @@ async fn auth_check_success_uses_the_service_account_route() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--url", &server.uri(), "--output", "json", "auth", "check"])
         .env("SIGNOZ_API_KEY", "test-secret")
@@ -481,7 +481,7 @@ async fn channel_list_projects_safe_summaries_without_provider_credentials() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -515,7 +515,7 @@ async fn metrics_usage_combines_both_reference_endpoints_at_the_cli_boundary() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": []})))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -546,7 +546,7 @@ async fn cli_timeout_oversize_and_reflected_secret_errors_are_structured() {
         )
         .mount(&timeout_server)
         .await;
-    let mut timeout = Command::cargo_bin("signoz").unwrap();
+    let mut timeout = Command::cargo_bin("signoz-cli").unwrap();
     timeout
         .args([
             "--url",
@@ -570,7 +570,7 @@ async fn cli_timeout_oversize_and_reflected_secret_errors_are_structured() {
         .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b'x'; 64 * 1024 * 1024 + 1]))
         .mount(&oversize_server)
         .await;
-    let mut oversize = Command::cargo_bin("signoz").unwrap();
+    let mut oversize = Command::cargo_bin("signoz-cli").unwrap();
     oversize
         .args([
             "--url",
@@ -592,7 +592,7 @@ async fn cli_timeout_oversize_and_reflected_secret_errors_are_structured() {
         .respond_with(ResponseTemplate::new(400).set_body_string("bad key: echo-secret"))
         .mount(&reflected_server)
         .await;
-    let mut reflected = Command::cargo_bin("signoz").unwrap();
+    let mut reflected = Command::cargo_bin("signoz-cli").unwrap();
     reflected
         .args([
             "--url",
@@ -629,7 +629,7 @@ async fn log_search_sends_v5_spec_and_reports_pagination_meta() {
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -673,7 +673,7 @@ async fn aggregate_commands_require_a_field_and_never_advertise_offset_paginatio
         })))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -702,7 +702,7 @@ async fn aggregate_commands_require_a_field_and_never_advertise_offset_paginatio
             .is_none()
     );
 
-    let mut missing_field = Command::cargo_bin("signoz").unwrap();
+    let mut missing_field = Command::cargo_bin("signoz-cli").unwrap();
     missing_field
         .args([
             "--output",
@@ -721,7 +721,7 @@ async fn aggregate_commands_require_a_field_and_never_advertise_offset_paginatio
             "--aggregate-on is required for --aggregation avg",
         ));
 
-    let mut offset = Command::cargo_bin("signoz").unwrap();
+    let mut offset = Command::cargo_bin("signoz-cli").unwrap();
     offset
         .args([
             "--output",
@@ -741,7 +741,7 @@ async fn aggregate_commands_require_a_field_and_never_advertise_offset_paginatio
 
 #[test]
 fn invalid_time_is_a_validation_error_before_network_access() {
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--output", "json", "logs", "search", "--since", "0h"])
         .assert()
@@ -753,7 +753,7 @@ fn invalid_time_is_a_validation_error_before_network_access() {
 #[test]
 fn missing_connection_is_a_structured_configuration_error() {
     let directory = tempfile::tempdir().unwrap();
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--output", "json", "auth", "check"])
         .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
@@ -767,7 +767,7 @@ fn missing_connection_is_a_structured_configuration_error() {
 
 #[test]
 fn raw_query_rejects_non_v5_json_before_network_access() {
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--output", "json", "query", "run", "--file", "-"])
         .write_stdin("{}")
@@ -795,7 +795,7 @@ async fn raw_query_inserts_an_omitted_v5_schema_version() {
             "spec": {"name": "A", "signal": "logs"}
         }]}
     });
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args([
             "--url",
@@ -821,7 +821,7 @@ async fn unsupported_rule_list_reports_the_minimum_version() {
         .respond_with(ResponseTemplate::new(404).set_body_string("missing"))
         .mount(&server)
         .await;
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--url", &server.uri(), "--output", "json", "rules", "list"])
         .env("SIGNOZ_API_KEY", "test-secret")
@@ -989,7 +989,7 @@ async fn remaining_remote_subcommands_dispatch_to_their_read_routes() {
             "json".to_owned(),
         ];
         arguments.extend(case.args.iter().map(|value| (*value).to_owned()));
-        let mut command = Command::cargo_bin("signoz").unwrap();
+        let mut command = Command::cargo_bin("signoz-cli").unwrap();
         command
             .args(arguments)
             .env("SIGNOZ_API_KEY", "test-secret")
@@ -1004,7 +1004,7 @@ async fn remaining_remote_subcommands_dispatch_to_their_read_routes() {
 
 #[test]
 fn clap_errors_are_structured_when_json_is_requested() {
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["--output", "json", "logs", "search", "--invented-flag"])
         .assert()
@@ -1016,7 +1016,7 @@ fn clap_errors_are_structured_when_json_is_requested() {
 
 #[test]
 fn clap_errors_are_structured_for_auto_output_in_a_pipeline() {
-    let mut command = Command::cargo_bin("signoz").unwrap();
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
     command
         .args(["logs", "search", "--invented-flag"])
         .assert()

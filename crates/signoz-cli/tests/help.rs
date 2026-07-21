@@ -5,6 +5,7 @@ use signoz_cli::args::Cli;
 fn command_tree_is_valid_and_complete() {
     Cli::command().debug_assert();
     let command = Cli::command();
+    assert_eq!(command.get_name(), "signoz-cli");
     let names: Vec<_> = command
         .get_subcommands()
         .map(|value| value.get_name())

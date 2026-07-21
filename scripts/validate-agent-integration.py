@@ -57,8 +57,8 @@ def validate(root: Path) -> list[str]:
         errors.append("skill description must exclude ordinary natural-language SigNoz investigations")
 
     required = [
-        "signoz version",
-        "signoz auth check",
+        "signoz-cli version",
+        "signoz-cli auth check",
         "--output json",
         "--since",
         "fields keys",
@@ -72,10 +72,12 @@ def validate(root: Path) -> list[str]:
     for token in required:
         if token not in skill:
             errors.append(f"skill missing required workflow token: {token}")
-    if not re.search(r"\bsignoz\s+", skill):
-        errors.append("skill contains no signoz command")
-    if re.search(r"(?m)^\s*signoz\b[^\n]*--api-key(?:[ =]|$)", skill):
+    if not re.search(r"(?m)^\s*signoz-cli(?:\s|$)", skill):
+        errors.append("skill contains no signoz-cli command")
+    if re.search(r"(?m)^\s*signoz-cli\b[^\n]*--api-key(?:[ =]|$)", skill):
         errors.append("skill contains forbidden --api-key argument")
+    if re.search(r"(?m)^\s*signoz(?:\s|$)", skill):
+        errors.append("skill contains legacy signoz command")
     if re.search(r"(?:sk|snz)[_-][A-Za-z0-9]{16,}", skill):
         errors.append("skill contains a realistic secret example")
 

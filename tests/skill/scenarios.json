@@ -1,8 +1,8 @@
 [
   {
     "id": "explicit-cli-query",
-    "prompt": "Use the signoz CLI to find ERROR logs from the last hour and return JSON.",
-    "mustInclude": ["signoz", "auth", "check", "logs", "search", "--since", "1h", "--output", "json", "severity_text = 'ERROR'"]
+    "prompt": "Use the signoz-cli executable to find ERROR logs from the last hour and return JSON.",
+    "mustInclude": ["signoz-cli", "auth", "check", "logs", "search", "--since", "1h", "--output", "json", "severity_text = 'ERROR'"]
   },
   {
     "id": "ordinary-signoz-query",
@@ -16,7 +16,7 @@
   },
   {
     "id": "pagination",
-    "prompt": "List every SigNoz service using the CLI.",
+    "prompt": "List every SigNoz service using the signoz-cli executable.",
     "mustHandleHasMore": true
   }
 ]
