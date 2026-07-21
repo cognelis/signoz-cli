@@ -1,0 +1,30 @@
+[package]
+name = "signoz-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "signoz"
+path = "src/main.rs"
+
+[dependencies]
+chrono.workspace = true
+clap.workspace = true
+directories.workspace = true
+keyring.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+signoz-client = { path = "../signoz-client" }
+tempfile.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+wiremock.workspace = true
+

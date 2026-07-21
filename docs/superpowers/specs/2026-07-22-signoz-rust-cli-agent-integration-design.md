@@ -106,7 +106,9 @@ profile 配置文件位于操作系统标准配置目录下的 `signoz/config.to
 
 ```text
 signoz version
+signoz auth login --api-key-stdin
 signoz auth check
+signoz auth logout
 signoz profile add|list|show|use|remove
 
 signoz metrics list|query|top|cardinality|usage

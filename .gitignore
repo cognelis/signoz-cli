@@ -1,0 +1,6 @@
+/.toolchain/
+/target/
+*.profraw
+
+## superpowsers
+docs/superpowsers
