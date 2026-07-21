@@ -1,0 +1,20 @@
+{
+  "name": "signoz-cli",
+  "interface": {
+    "displayName": "SigNoz CLI"
+  },
+  "plugins": [
+    {
+      "name": "signoz-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/signoz-cli"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

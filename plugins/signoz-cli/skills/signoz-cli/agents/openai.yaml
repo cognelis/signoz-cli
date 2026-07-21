@@ -1,0 +1,6 @@
+interface:
+  display_name: "SigNoz CLI"
+  short_description: "Safe Rust CLI workflows for SigNoz automation"
+  default_prompt: "Use $signoz-cli to query SigNoz through the Rust CLI with JSON output."
+policy:
+  allow_implicit_invocation: true

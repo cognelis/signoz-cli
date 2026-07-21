@@ -1,0 +1,19 @@
+{
+  "name": "signoz-cli",
+  "owner": {
+    "name": "signoz-cli contributors"
+  },
+  "metadata": {
+    "description": "Rust SigNoz CLI skills for Claude Code",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "signoz-cli",
+      "description": "Use the Rust SigNoz CLI safely in shell, CI, and JSON automation workflows.",
+      "source": "./plugins/signoz-cli",
+      "strict": false,
+      "skills": ["./plugins/signoz-cli/skills/signoz-cli"]
+    }
+  ]
+}

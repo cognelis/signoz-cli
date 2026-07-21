@@ -114,7 +114,7 @@ git commit -m "feat(skill): add signoz cli workflow"
 
 - [ ] **Step 1: Add the Codex manifest and marketplace**
 
-The plugin manifest uses name `signoz-cli`, version `0.1.0`, `skills: "./skills/"`, MIT license, repository metadata, and interface capabilities `Read`. The repo marketplace name is `signoz-cli-local`, and its local source path is `../../plugins/signoz-cli` relative to `.agents/plugins/marketplace.json`.
+The plugin manifest uses name `signoz-cli`, version `0.1.0`, `skills: "./skills/"`, the workspace's Apache-2.0 license, repository metadata, and interface capabilities `Read`. The repo marketplace name is `signoz-cli`, and its repository-root local source path is `./plugins/signoz-cli`.
 
 - [ ] **Step 2: Add the Claude Code manifest and marketplace**
 
@@ -217,4 +217,3 @@ git commit -m "docs: add codex and claude signoz cli setup"
 - Spec coverage: narrow trigger boundary, shared skill, both plugin formats, marketplaces, secret handling, pagination, injection resistance, official-skill routing, and platform discovery each have an implementing task.
 - Placeholder scan: every step has exact artifacts, commands, and expected evidence.
 - Type consistency: plugin and skill are named `signoz-cli` throughout; both marketplaces resolve to `plugins/signoz-cli`; versions remain `0.1.0`.
-

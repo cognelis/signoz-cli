@@ -1,0 +1,13 @@
+{
+  "name": "signoz-cli",
+  "version": "0.1.0",
+  "description": "Use the Rust SigNoz CLI safely in shell, CI, and JSON automation workflows.",
+  "author": {
+    "name": "signoz-cli contributors"
+  },
+  "homepage": "https://gitee.com/caspian/signoz-cli",
+  "repository": "https://gitee.com/caspian/signoz-cli",
+  "license": "Apache-2.0",
+  "keywords": ["signoz", "observability", "cli", "ci"],
+  "skills": "./skills/"
+}
