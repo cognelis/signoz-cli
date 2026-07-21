@@ -10,6 +10,18 @@ import sys
 from pathlib import Path
 
 
+_SHELL_TOKEN_CHARACTER = r"[\w-]"
+_SIGNOZ_CLI_TOKEN = rf"(?<!{_SHELL_TOKEN_CHARACTER})signoz-cli(?!{_SHELL_TOKEN_CHARACTER})"
+_LEGACY_SIGNOZ_TOKEN = rf"(?<!{_SHELL_TOKEN_CHARACTER})signoz(?!{_SHELL_TOKEN_CHARACTER})"
+
+SIGNOZ_CLI_COMMAND = re.compile(_SIGNOZ_CLI_TOKEN)
+LEGACY_SIGNOZ_COMMAND = re.compile(_LEGACY_SIGNOZ_TOKEN)
+FORBIDDEN_API_KEY_ARGUMENT = re.compile(
+    rf"{_SIGNOZ_CLI_TOKEN}[^\n]*(?:\\\r?\n[^\n]*)*--api-key(?:[ =]|$)",
+    re.MULTILINE,
+)
+
+
 def _json(path: Path, errors: list[str]) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -72,11 +84,11 @@ def validate(root: Path) -> list[str]:
     for token in required:
         if token not in skill:
             errors.append(f"skill missing required workflow token: {token}")
-    if not re.search(r"(?m)^\s*signoz-cli(?:\s|$)", skill):
+    if not SIGNOZ_CLI_COMMAND.search(skill):
         errors.append("skill contains no signoz-cli command")
-    if re.search(r"(?m)^\s*signoz-cli\b[^\n]*--api-key(?:[ =]|$)", skill):
+    if FORBIDDEN_API_KEY_ARGUMENT.search(skill):
         errors.append("skill contains forbidden --api-key argument")
-    if re.search(r"(?m)^\s*signoz(?:\s|$)", skill):
+    if LEGACY_SIGNOZ_COMMAND.search(skill):
         errors.append("skill contains legacy signoz command")
     if re.search(r"(?:sk|snz)[_-][A-Za-z0-9]{16,}", skill):
         errors.append("skill contains a realistic secret example")

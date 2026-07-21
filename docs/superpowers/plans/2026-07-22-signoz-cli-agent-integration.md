@@ -216,4 +216,4 @@ git commit -m "docs: add codex and claude signoz-cli setup"
 
 - Spec coverage: narrow trigger boundary, shared skill, both plugin formats, marketplaces, secret handling, pagination, injection resistance, official-skill routing, and platform discovery each have an implementing task.
 - Placeholder scan: every step has exact artifacts, commands, and expected evidence.
-- Type consistency: plugin and skill are named `signoz-cli` throughout; both marketplaces resolve to `plugins/signoz-cli`; versions remain `0.1.0`.
+- Type consistency: plugin and skill are named `signoz-cli` throughout; both marketplaces resolve to `plugins/signoz-cli`; both manifests share the `0.1.0` core version and the same synchronized cachebuster.
