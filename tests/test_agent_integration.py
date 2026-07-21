@@ -38,6 +38,10 @@ class AgentIntegrationValidationTest(unittest.TestCase):
             ("long description", self.long_description),
             ("missing command", lambda root: self.replace(root, "signoz-cli ", "observe ")),
             (
+                "missing doctor workflow",
+                lambda root: self.replace(root, "signoz-cli doctor", "signoz-cli inspect"),
+            ),
+            (
                 "forbidden key flag",
                 lambda root: self.append_skill(root, "\nsignoz-cli --api-key secret\n"),
             ),

@@ -59,6 +59,208 @@ fn client_error_codes_have_stable_process_exit_codes() {
 }
 
 #[tokio::test]
+async fn doctor_reports_ordered_healthy_checks_without_exposing_identity_secrets() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/service_accounts/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "id": "account-id",
+                "name": "automation",
+                "orgId": "org-id",
+                "apiKey": "must-not-be-emitted"
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .env("SIGNOZ_API_KEY", "never-print-this")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("never-print-this"));
+    assert!(!stdout.contains("must-not-be-emitted"));
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(envelope["schemaVersion"], "1");
+    assert_eq!(envelope["command"], "doctor");
+    let checks = envelope["data"].as_array().unwrap();
+    assert_eq!(
+        checks
+            .iter()
+            .map(|check| check["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "version",
+            "configuration",
+            "credentials",
+            "api",
+            "authentication"
+        ]
+    );
+    assert!(checks.iter().all(|check| check["status"] == "pass"));
+    assert_eq!(envelope["meta"]["status"], 200);
+}
+
+#[test]
+fn doctor_reports_missing_connection_on_stdout_and_exits_with_config_code() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--output", "json", "doctor"])
+        .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
+        .env_remove("SIGNOZ_URL")
+        .env_remove("SIGNOZ_API_KEY")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stderr.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["command"], "doctor");
+    let checks = envelope["data"].as_array().unwrap();
+    assert_eq!(checks[0]["status"], "pass");
+    assert_eq!(checks[1]["status"], "fail");
+    assert_eq!(checks[2]["status"], "skipped");
+    assert_eq!(checks[3]["status"], "skipped");
+    assert_eq!(checks[4]["status"], "skipped");
+}
+
+#[test]
+fn doctor_distinguishes_missing_credentials_from_valid_configuration() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args([
+            "--url",
+            "https://unused.example.com",
+            "--output",
+            "json",
+            "doctor",
+        ])
+        .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
+        .env_remove("SIGNOZ_URL")
+        .env_remove("SIGNOZ_API_KEY")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stderr.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["data"][1]["status"], "pass");
+    assert_eq!(envelope["data"][2]["status"], "fail");
+    assert_eq!(envelope["data"][3]["status"], "skipped");
+    assert_eq!(envelope["data"][4]["status"], "skipped");
+}
+
+#[test]
+fn doctor_does_not_echo_invalid_configuration_contents() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("config.toml");
+    std::fs::write(&config, "never-echo-this = [").unwrap();
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--output", "json", "doctor"])
+        .env("SIGNOZ_CONFIG", config)
+        .env_remove("SIGNOZ_URL")
+        .env_remove("SIGNOZ_API_KEY")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("never-echo-this"));
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(envelope["data"][1]["name"], "configuration");
+    assert_eq!(envelope["data"][1]["status"], "fail");
+}
+
+#[tokio::test]
+async fn doctor_reports_reachable_but_unauthorized_without_leaking_the_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/service_accounts/me"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("denied: echoed-secret"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .env("SIGNOZ_API_KEY", "echoed-secret")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("echoed-secret"));
+    let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(envelope["meta"]["status"], 401);
+    assert_eq!(envelope["data"][3]["status"], "pass");
+    assert_eq!(envelope["data"][4]["status"], "fail");
+}
+
+#[tokio::test]
+async fn doctor_reports_upstream_failure_and_skips_authentication() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/service_accounts/me"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("unavailable"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(6));
+    assert!(output.stderr.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["meta"]["status"], 500);
+    assert_eq!(envelope["data"][3]["status"], "fail");
+    assert_eq!(envelope["data"][4]["status"], "skipped");
+}
+
+#[tokio::test]
+async fn doctor_reports_malformed_identity_as_incompatible_authentication() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/service_accounts/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": []})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(7));
+    assert!(output.stderr.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["meta"]["status"], 200);
+    assert_eq!(envelope["data"][3]["status"], "pass");
+    assert_eq!(envelope["data"][4]["status"], "fail");
+}
+
+#[tokio::test]
 async fn metrics_list_emits_the_versioned_json_envelope() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

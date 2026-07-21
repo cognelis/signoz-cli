@@ -62,6 +62,19 @@ pub struct ResolvedConnection {
     pub profile: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct ResolvedTarget {
+    pub origin: SigNozOrigin,
+    pub profile: Option<String>,
+    credential_source: CredentialSource,
+}
+
+#[derive(Debug)]
+enum CredentialSource {
+    Environment { missing_message: &'static str },
+    Profile,
+}
+
 impl ConfigFile {
     pub fn load(path: &Path) -> Result<Self, String> {
         if !path.exists() {
@@ -138,6 +151,47 @@ impl ConfigFile {
         )
     }
 
+    pub fn resolve_target(
+        &self,
+        explicit_url: Option<&str>,
+        selected_profile: Option<&str>,
+    ) -> Result<ResolvedTarget, String> {
+        let environment_url = std::env::var("SIGNOZ_URL").ok();
+        self.resolve_target_inputs(explicit_url, selected_profile, environment_url.as_deref())
+    }
+
+    pub fn resolve_credentials(
+        &self,
+        target: ResolvedTarget,
+        environment_key: Option<&str>,
+        store: &dyn CredentialStore,
+    ) -> Result<ResolvedConnection, String> {
+        let key = match target.credential_source {
+            CredentialSource::Environment { missing_message } => environment_key
+                .map(str::to_owned)
+                .filter(|key| !key.is_empty())
+                .ok_or_else(|| missing_message.to_owned())?,
+            CredentialSource::Profile => {
+                let profile = target
+                    .profile
+                    .as_deref()
+                    .expect("profile credential targets always carry a profile name");
+                if let Some(key) = environment_key {
+                    Some(key.to_owned())
+                } else {
+                    store.get(profile)?
+                }
+                .filter(|key| !key.is_empty())
+                .ok_or_else(|| format!("profile '{profile}' has no API key; run auth login"))?
+            }
+        };
+        Ok(ResolvedConnection {
+            origin: target.origin,
+            credentials: Credentials::new(key),
+            profile: target.profile,
+        })
+    }
+
     fn resolve_inputs(
         &self,
         explicit_url: Option<&str>,
@@ -146,58 +200,52 @@ impl ConfigFile {
         environment_key: Option<&str>,
         store: &dyn CredentialStore,
     ) -> Result<ResolvedConnection, String> {
+        let target = self.resolve_target_inputs(explicit_url, selected_profile, environment_url)?;
+        self.resolve_credentials(target, environment_key, store)
+    }
+
+    fn resolve_target_inputs(
+        &self,
+        explicit_url: Option<&str>,
+        selected_profile: Option<&str>,
+        environment_url: Option<&str>,
+    ) -> Result<ResolvedTarget, String> {
         if let Some(url) = explicit_url {
-            let key = environment_key
-                .map(str::to_owned)
-                .filter(|key| !key.is_empty())
-                .ok_or_else(|| "SIGNOZ_API_KEY is required with --url or SIGNOZ_URL".to_owned())?;
-            return Ok(ResolvedConnection {
+            return Ok(ResolvedTarget {
                 origin: SigNozOrigin::parse(url)?,
-                credentials: Credentials::new(key),
                 profile: None,
+                credential_source: CredentialSource::Environment {
+                    missing_message: "SIGNOZ_API_KEY is required with --url or SIGNOZ_URL",
+                },
             });
         }
         if let Some(profile_name) = selected_profile {
-            return self.resolve_profile(profile_name, environment_key, store);
+            return self.resolve_profile_target(profile_name);
         }
         if let Some(url) = environment_url {
-            let key = environment_key
-                .map(str::to_owned)
-                .filter(|key| !key.is_empty())
-                .ok_or_else(|| "SIGNOZ_API_KEY is required with SIGNOZ_URL".to_owned())?;
-            return Ok(ResolvedConnection {
+            return Ok(ResolvedTarget {
                 origin: SigNozOrigin::parse(url)?,
-                credentials: Credentials::new(key),
                 profile: None,
+                credential_source: CredentialSource::Environment {
+                    missing_message: "SIGNOZ_API_KEY is required with SIGNOZ_URL",
+                },
             });
         }
         let profile_name = self.current_profile.as_deref().ok_or_else(|| {
             "no connection: use --url with SIGNOZ_API_KEY or select a profile".to_owned()
         })?;
-        self.resolve_profile(profile_name, environment_key, store)
+        self.resolve_profile_target(profile_name)
     }
 
-    fn resolve_profile(
-        &self,
-        profile_name: &str,
-        environment_key: Option<&str>,
-        store: &dyn CredentialStore,
-    ) -> Result<ResolvedConnection, String> {
+    fn resolve_profile_target(&self, profile_name: &str) -> Result<ResolvedTarget, String> {
         let profile = self
             .profiles
             .get(profile_name)
             .ok_or_else(|| format!("profile '{profile_name}' does not exist"))?;
-        let key = if let Some(key) = environment_key {
-            Some(key.to_owned())
-        } else {
-            store.get(profile_name)?
-        }
-        .filter(|key| !key.is_empty())
-        .ok_or_else(|| format!("profile '{profile_name}' has no API key; run auth login"))?;
-        Ok(ResolvedConnection {
+        Ok(ResolvedTarget {
             origin: SigNozOrigin::parse(&profile.url)?,
-            credentials: Credentials::new(key),
             profile: Some(profile_name.to_owned()),
+            credential_source: CredentialSource::Profile,
         })
     }
 }
@@ -318,6 +366,76 @@ mod tests {
             .resolve(None, Some("ci"), Some("environment-secret"), &FailingStore)
             .unwrap();
         assert_eq!(resolved.profile.as_deref(), Some("ci"));
+    }
+
+    #[test]
+    fn target_selection_needs_no_key_and_preserves_connection_precedence() {
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("selected", "https://selected.example.com")
+            .unwrap();
+        config
+            .add_profile("current", "https://current.example.com")
+            .unwrap();
+        config.current_profile = Some("current".into());
+
+        let explicit = config
+            .resolve_target_inputs(
+                Some("https://explicit.example.com"),
+                Some("selected"),
+                Some("https://environment.example.com"),
+            )
+            .unwrap();
+        assert_eq!(explicit.origin.as_str(), "https://explicit.example.com");
+        assert_eq!(explicit.profile, None);
+
+        let selected = config
+            .resolve_target_inputs(
+                None,
+                Some("selected"),
+                Some("https://environment.example.com"),
+            )
+            .unwrap();
+        assert_eq!(selected.origin.as_str(), "https://selected.example.com");
+        assert_eq!(selected.profile.as_deref(), Some("selected"));
+
+        let environment = config
+            .resolve_target_inputs(None, None, Some("https://environment.example.com"))
+            .unwrap();
+        assert_eq!(
+            environment.origin.as_str(),
+            "https://environment.example.com"
+        );
+        assert_eq!(environment.profile, None);
+
+        let current = config.resolve_target_inputs(None, None, None).unwrap();
+        assert_eq!(current.origin.as_str(), "https://current.example.com");
+        assert_eq!(current.profile.as_deref(), Some("current"));
+    }
+
+    #[test]
+    fn credential_resolution_happens_after_target_selection() {
+        let store = MemoryStore::default();
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("prod", "https://signoz.example.com")
+            .unwrap();
+        store.set("prod", "keyring-secret").unwrap();
+
+        let target = config
+            .resolve_target_inputs(None, Some("prod"), None)
+            .unwrap();
+        let resolved = config.resolve_credentials(target, None, &store).unwrap();
+        assert_eq!(resolved.profile.as_deref(), Some("prod"));
+        assert!(!format!("{:?}", resolved.credentials).contains("keyring-secret"));
+
+        let target = config
+            .resolve_target_inputs(Some("https://direct.example.com"), None, None)
+            .unwrap();
+        let error = config
+            .resolve_credentials(target, None, &store)
+            .unwrap_err();
+        assert!(error.contains("SIGNOZ_API_KEY"));
     }
 
     #[test]

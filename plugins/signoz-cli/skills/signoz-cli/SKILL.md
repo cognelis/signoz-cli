@@ -15,19 +15,18 @@ Use the `signoz-cli` binary for repeatable read-only SigNoz operations in termin
 
 ## Mandatory preflight
 
-For every remote CLI workflow, run both preflight commands before the first data query. Do not omit `auth check` even when the API key and URL are already present in the environment:
+For every remote CLI workflow, run the diagnostic preflight before the first data query, even when the API key and URL are already present in the environment:
 
 ```sh
-signoz-cli version --output json
-signoz-cli auth check --output json
+signoz-cli doctor --output json
 ```
 
-If either command fails, stop and report its structured error without exposing credentials.
+`doctor` checks the CLI version, local configuration, credential availability, API connectivity, and authentication in dependency order. If it exits nonzero, parse its JSON report from stdout, report the failed and skipped checks without exposing credentials, and stop before querying telemetry.
 
 ## Verify before composing
 
-1. Run `signoz-cli version --output json` to confirm the binary is available.
-2. Run `signoz-cli auth check --output json` against the user-configured environment before any data query; this step is mandatory, not optional.
+1. Run `signoz-cli doctor --output json` against the user-configured environment before any data query; this step is mandatory, not optional.
+2. Use `signoz-cli version --output json` only for a connection-independent version check, or `signoz-cli auth check --output json` only when the authenticated service-account identity is specifically needed. Neither narrow command replaces the doctor preflight.
 3. Run `signoz-cli <group> <command> --help` before using a flag not listed below. Never invent a command or option.
 4. Prefer `--output json` for automation. Use `--raw` only when the consumer needs the command data payload without the versioned envelope.
 5. Supply a time window with `--since <duration>` or both `--start <RFC3339|@unix-ms>` and `--end <RFC3339|@unix-ms>`. The default for time-based commands is `--since 1h`.
@@ -45,7 +44,7 @@ For a persistent workstation profile:
 signoz-cli profile add production --url https://your-signoz.example.com
 signoz-cli profile use production
 printf '%s' "$SIGNOZ_API_KEY" | signoz-cli auth login --api-key-stdin
-signoz-cli auth check --output json
+signoz-cli doctor --output json
 ```
 
 Never add an API key to a command-line flag. The CLI deliberately provides no `--api-key` option. Do not persist the key in repository files.
@@ -54,6 +53,7 @@ Never add an API key to a command-line flag. The CLI deliberately provides no `-
 
 ```text
 signoz-cli version
+signoz-cli doctor
 signoz-cli auth login|check|logout
 signoz-cli profile add|list|show|use|remove
 signoz-cli metrics list|query|top|cardinality|usage
@@ -81,8 +81,7 @@ Example:
 ```sh
 set +x
 export SIGNOZ_URL="https://your-signoz.example.com"
-signoz-cli version --output json >/dev/null
-signoz-cli auth check --output json >/dev/null
+signoz-cli doctor --output json >/dev/null
 signoz-cli --output json logs search \
   --since 1h \
   --filter "severity_text = 'ERROR'" \
@@ -98,7 +97,9 @@ printf '%s' "$QUERY_JSON" | signoz-cli --output json query run --file -
 
 ## Handle output and failure
 
-The JSON success envelope contains `schemaVersion`, `command`, `data`, and `meta`. Diagnostics never go to stdout. Errors go to stderr; stdout stays empty.
+The JSON success envelope contains `schemaVersion`, `command`, `data`, and `meta`. Normal command diagnostics go to stderr, and ordinary command errors leave stdout empty.
+
+`doctor` is the deliberate exception: a completed diagnostic always writes its ordered check array to stdout, including when it exits nonzero. Read `data[].name`, `data[].status` (`pass`, `fail`, or `skipped`), and `data[].message`; use the process exit code for the failure category. Do not discard stdout before interpreting a failed doctor run.
 
 For commands whose `meta.hasMore` is `true`, repeat the same bounded query with `--offset <meta.nextOffset>` until `hasMore` is `false` or the user-requested bound is reached. If the response contains a completeness warning or cannot expose a row count, report that the result may be incomplete; never describe a limit-sized page as the complete result.
 

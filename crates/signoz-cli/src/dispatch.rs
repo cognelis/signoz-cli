@@ -13,12 +13,14 @@ use signoz_client::{
 
 use crate::args::*;
 use crate::config::{ConfigFile, CredentialStore, SystemKeyring, default_config_path};
+use crate::doctor::DoctorReport;
 use crate::output::Meta;
 
 pub struct DispatchResult {
     pub command: String,
     pub data: Value,
     pub meta: Meta,
+    pub failure_code: Option<ErrorCode>,
 }
 
 #[derive(Debug)]
@@ -79,7 +81,11 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
             command: "version".into(),
             data: json!({"version": env!("CARGO_PKG_VERSION")}),
             meta: Meta::default(),
+            failure_code: None,
         });
+    }
+    if matches!(&cli.command, Command::Doctor) {
+        return Ok(run_doctor(cli).await);
     }
     let now = Utc::now();
     let path = config_path()?;
@@ -201,7 +207,128 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
         command,
         data: response.value,
         meta,
+        failure_code: None,
     })
+}
+
+async fn run_doctor(cli: &Cli) -> DispatchResult {
+    let mut report = DoctorReport::new(env!("CARGO_PKG_VERSION"));
+    let mut meta = Meta::default();
+    let path = match config_path() {
+        Ok(path) => path,
+        Err(_) => {
+            report.configuration_failed();
+            return doctor_result(report, meta, Some(ErrorCode::Config));
+        }
+    };
+    let config = match ConfigFile::load(&path) {
+        Ok(config) => config,
+        Err(_) => {
+            report.configuration_failed();
+            return doctor_result(report, meta, Some(ErrorCode::Config));
+        }
+    };
+    let target = match config.resolve_target(cli.url.as_deref(), cli.profile.as_deref()) {
+        Ok(target) => target,
+        Err(_) => {
+            report.configuration_failed();
+            return doctor_result(report, meta, Some(ErrorCode::Config));
+        }
+    };
+    report.configuration_passed();
+    meta.profile = target.profile.clone();
+
+    let key = std::env::var("SIGNOZ_API_KEY").ok();
+    let connection = match config.resolve_credentials(target, key.as_deref(), &SystemKeyring) {
+        Ok(connection) => connection,
+        Err(_) => {
+            report.credentials_failed();
+            return doctor_result(report, meta, Some(ErrorCode::Config));
+        }
+    };
+    report.credentials_passed();
+
+    let client = match SigNozClient::new_with_timeout(
+        connection.origin,
+        connection.credentials,
+        Duration::from_secs(cli.timeout.max(1)),
+    ) {
+        Ok(client) => client,
+        Err(error) => {
+            report.api_failed(doctor_api_failure_message(error.code()));
+            return doctor_result(report, meta, Some(error.code()));
+        }
+    };
+    let started = Instant::now();
+    match client.execute(Operation::auth_me()).await {
+        Ok(mut response) => {
+            meta.status = Some(response.meta.status);
+            meta.request_id = response.meta.request_id;
+            meta.elapsed_ms = Some(started.elapsed().as_millis());
+            report.api_passed();
+            match project_auth_identity(&mut response.value) {
+                Ok(()) => {
+                    report.authentication_passed();
+                    doctor_result(report, meta, None)
+                }
+                Err(error) => {
+                    report.authentication_failed(
+                        "SigNoz returned an incompatible authentication response",
+                    );
+                    doctor_result(report, meta, Some(error.code))
+                }
+            }
+        }
+        Err(error) => {
+            let code = error.code();
+            meta.status = error.status();
+            meta.elapsed_ms = Some(started.elapsed().as_millis());
+            if matches!(code, ErrorCode::Unauthorized | ErrorCode::Forbidden) {
+                report.api_passed();
+                report.authentication_failed(match code {
+                    ErrorCode::Unauthorized => "the API key was not accepted by SigNoz",
+                    ErrorCode::Forbidden => "the API key is not allowed to access SigNoz",
+                    _ => unreachable!(),
+                });
+            } else {
+                report.api_failed(doctor_api_failure_message(code));
+            }
+            doctor_result(report, meta, Some(code))
+        }
+    }
+}
+
+fn doctor_result(
+    report: DoctorReport,
+    meta: Meta,
+    failure_code: Option<ErrorCode>,
+) -> DispatchResult {
+    DispatchResult {
+        command: "doctor".into(),
+        data: report.into_value(),
+        meta,
+        failure_code,
+    }
+}
+
+fn doctor_api_failure_message(code: ErrorCode) -> &'static str {
+    match code {
+        ErrorCode::Network => "SigNoz API is unreachable",
+        ErrorCode::Timeout => "SigNoz API probe timed out",
+        ErrorCode::Upstream => "SigNoz API returned an upstream error",
+        ErrorCode::RateLimited => "SigNoz API rate-limited the diagnostic request",
+        ErrorCode::NotFound
+        | ErrorCode::RequestRejected
+        | ErrorCode::FeatureUnsupported
+        | ErrorCode::Unauthorized
+        | ErrorCode::Forbidden => "SigNoz API rejected the diagnostic request",
+        ErrorCode::ResponseTooLarge | ErrorCode::IncompatibleResponse => {
+            "SigNoz API returned an incompatible diagnostic response"
+        }
+        ErrorCode::Validation | ErrorCode::Config => {
+            "the diagnostic API client could not be configured"
+        }
+    }
 }
 
 enum Remote {
@@ -226,6 +353,7 @@ fn prepare(
 ) -> Result<Prepared, AppError> {
     match command {
         Command::Version => local("version", json!({"version": env!("CARGO_PKG_VERSION")})),
+        Command::Doctor => unreachable!("doctor is dispatched before command preparation"),
         Command::Auth { command } => match command {
             AuthCommand::Check => Ok(Prepared::Operation("auth.check", Operation::auth_me())),
             AuthCommand::Login { api_key_stdin } => {
@@ -500,6 +628,7 @@ fn local(command: &str, data: Value) -> Result<Prepared, AppError> {
         command: command.to_owned(),
         data,
         meta: Meta::default(),
+        failure_code: None,
     }))
 }
 

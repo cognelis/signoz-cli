@@ -24,7 +24,7 @@ For CI and short-lived shells, use environment variables. Keep the API key in th
 set +x
 export SIGNOZ_URL="https://your-signoz.example.com"
 export SIGNOZ_API_KEY="...from a secret store..."
-signoz-cli auth check --output json
+signoz-cli doctor --output json
 ```
 
 For workstation use, profiles store only the instance URL in the operating-system config directory. API keys are stored in the operating-system keyring.
@@ -33,10 +33,22 @@ For workstation use, profiles store only the instance URL in the operating-syste
 signoz-cli profile add production --url https://your-signoz.example.com
 signoz-cli profile use production
 printf '%s' "$SIGNOZ_API_KEY" | signoz-cli auth login --api-key-stdin
-signoz-cli auth check --output json
+signoz-cli doctor --output json
 ```
 
 There is intentionally no `--api-key` flag, so the secret does not enter shell history or process listings.
+
+## Diagnose a connection
+
+Run the read-only diagnostic before remote automation or when a connection fails:
+
+```sh
+signoz-cli doctor --output json
+```
+
+It checks the CLI version, connection configuration, credential availability, API connectivity, and service-account authentication in order. It sends one request to the same identity endpoint used by `auth check` and never emits the API key.
+
+A completed doctor run always writes its ordered `pass`/`fail`/`skipped` check array to stdout. An unhealthy result still exits with the matching nonzero code below, so scripts should capture stdout before testing the status. `auth check` remains available when only the authenticated service-account identity is needed.
 
 ## Query SigNoz
 
@@ -77,12 +89,13 @@ Successful JSON output has a stable versioned envelope:
 }
 ```
 
-`--raw` emits only the command data payload without the versioned envelope (direct commands keep the upstream shape; composite and client-paginated commands may combine or slice it). Diagnostics and errors are written to stderr; stdout remains clean for pipelines. `--output auto` uses a table only when stdout is a terminal.
+`--raw` emits only the command data payload without the versioned envelope (direct commands keep the upstream shape; composite and client-paginated commands may combine or slice it). Normal diagnostics and errors are written to stderr; stdout remains clean for pipelines. The exception is `doctor`: a completed unhealthy diagnosis writes its report to stdout before exiting nonzero. `--output auto` uses a table only when stdout is a terminal.
 
 ## Command groups
 
 ```text
 version
+doctor
 auth login|check|logout
 profile add|list|show|use|remove
 metrics list|query|top|cardinality|usage
@@ -149,4 +162,4 @@ In Claude Code, use `/plugin marketplace add SigNoz/agent-skills` followed by `/
 - The CLI accepts self-hosted HTTP origins but does not provide an insecure TLS bypass.
 - Telemetry can contain secrets or personal data. Review logs and traces before storing them as CI artifacts.
 
-The route map and behavior were derived from the current official SigNoz MCP server and Agent Skills repositories. See the design record in [`docs/superpowers/specs/2026-07-22-signoz-rust-cli-agent-integration-design.md`](docs/superpowers/specs/2026-07-22-signoz-rust-cli-agent-integration-design.md).
+The route map and behavior were derived from the current official SigNoz MCP server and Agent Skills repositories. See the main [integration design](docs/superpowers/specs/2026-07-22-signoz-rust-cli-agent-integration-design.md) and the [`doctor` design](docs/superpowers/specs/2026-07-22-signoz-cli-doctor-design.md).

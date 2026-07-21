@@ -31,6 +31,7 @@ async fn main() {
     };
     match dispatch::run(&cli).await {
         Ok(result) => {
+            let failure_code = result.failure_code;
             if cli.verbose {
                 eprintln!(
                     "signoz-cli: command={} status={} elapsedMs={}",
@@ -55,6 +56,9 @@ async fn main() {
                     None,
                 );
                 std::process::exit(7);
+            }
+            if let Some(code) = failure_code {
+                std::process::exit(exit_code(code));
             }
         }
         Err(error) => {

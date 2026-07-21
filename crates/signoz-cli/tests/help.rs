@@ -12,6 +12,7 @@ fn command_tree_is_valid_and_complete() {
         .collect();
     for expected in [
         "version",
+        "doctor",
         "auth",
         "profile",
         "metrics",

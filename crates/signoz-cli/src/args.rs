@@ -35,6 +35,8 @@ pub enum OutputFormat {
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
     Version,
+    /// Diagnose local configuration, credentials, connectivity, and authentication.
+    Doctor,
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
