@@ -126,6 +126,16 @@ def validate(root: Path) -> list[str]:
         if entry is None:
             errors.append(f"{label} marketplace has no signoz-cli entry")
             continue
+        if label == "Claude" and (
+            entry.get("strict") is False
+            or any(
+                field in entry
+                for field in ("skills", "commands", "agents", "hooks", "mcpServers", "lspServers")
+            )
+        ):
+            errors.append(
+                "Claude marketplace must leave component authority to the plugin manifest"
+            )
         source = entry.get("source")
         if isinstance(source, dict):
             source = source.get("path")

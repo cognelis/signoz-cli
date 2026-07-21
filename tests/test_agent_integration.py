@@ -81,6 +81,7 @@ class AgentIntegrationValidationTest(unittest.TestCase):
             ),
             ("version mismatch", self.version_mismatch),
             ("missing target", self.missing_target),
+            ("duplicate Claude components", self.duplicate_claude_components),
             ("trigger overlap", self.trigger_overlap),
             ("implicit invocation disabled", self.implicit_invocation_disabled),
             ("unimplemented scenario expectation", self.unimplemented_scenario),
@@ -121,6 +122,16 @@ class AgentIntegrationValidationTest(unittest.TestCase):
         path = root / ".claude-plugin/marketplace.json"
         value = json.loads(path.read_text())
         value["plugins"][0]["source"] = "./missing"
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+    @staticmethod
+    def duplicate_claude_components(root: Path) -> None:
+        path = root / ".claude-plugin/marketplace.json"
+        value = json.loads(path.read_text())
+        value["plugins"][0]["strict"] = False
+        value["plugins"][0]["skills"] = [
+            "./plugins/signoz-cli/skills/signoz-cli"
+        ]
         path.write_text(json.dumps(value), encoding="utf-8")
 
     def trigger_overlap(self, root: Path) -> None:
