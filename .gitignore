@@ -1,5 +1,6 @@
 /.toolchain/
 /target/
+/.worktrees/
 *.profraw
 
 ## superpowsers
