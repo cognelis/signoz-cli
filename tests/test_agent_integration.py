@@ -45,6 +45,30 @@ class AgentIntegrationValidationTest(unittest.TestCase):
                 "legacy command",
                 lambda root: self.append_skill(root, "\nsignoz version --output json\n"),
             ),
+            (
+                "pipeline legacy command",
+                lambda root: self.append_skill(
+                    root, "\nprintf '%s' x | signoz version --output json\n"
+                ),
+            ),
+            (
+                "array legacy command",
+                lambda root: self.append_skill(
+                    root, "\nargs=(signoz version --output json)\n"
+                ),
+            ),
+            (
+                "prompt-prefix legacy command",
+                lambda root: self.append_skill(
+                    root, "\n$ signoz version --output json\n"
+                ),
+            ),
+            (
+                "multiline forbidden key flag",
+                lambda root: self.append_skill(
+                    root, "\nsignoz-cli logs search \\\n  --api-key secret\n"
+                ),
+            ),
             ("version mismatch", self.version_mismatch),
             ("missing target", self.missing_target),
             ("trigger overlap", self.trigger_overlap),
