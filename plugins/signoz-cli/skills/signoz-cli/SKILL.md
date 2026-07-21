@@ -78,10 +78,21 @@ For `logs aggregate` and `traces aggregate`, use one of the advertised aggregati
 
 Example:
 
-```sh
+```bash
 set +x
+set -eu
+umask 077
 export SIGNOZ_URL="https://your-signoz.example.com"
-signoz-cli doctor --output json >/dev/null
+doctor_report="$(mktemp)"
+trap 'rm -f "$doctor_report"' EXIT
+if signoz-cli doctor --output json >"$doctor_report"; then
+  rm -f "$doctor_report"
+  trap - EXIT
+else
+  doctor_status=$?
+  cat "$doctor_report" >&2
+  exit "$doctor_status"
+fi
 signoz-cli --output json logs search \
   --since 1h \
   --filter "severity_text = 'ERROR'" \

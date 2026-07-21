@@ -48,7 +48,7 @@ signoz-cli doctor --output json
 
 It checks the CLI version, connection configuration, credential availability, API connectivity, and service-account authentication in order. It sends one request to the same identity endpoint used by `auth check` and never emits the API key.
 
-A completed doctor run always writes its ordered `pass`/`fail`/`skipped` check array to stdout. An unhealthy result still exits with the matching nonzero code below, so scripts should capture stdout before testing the status. `auth check` remains available when only the authenticated service-account identity is needed.
+A completed doctor run always writes its ordered `pass`/`fail`/`skipped` check array to stdout. An unhealthy result still exits with the matching nonzero code below, so scripts should capture stdout before testing the status. Stderr stays empty unless `--verbose` is explicitly requested. `auth check` remains available when only the authenticated service-account identity is needed.
 
 ## Query SigNoz
 

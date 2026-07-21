@@ -173,9 +173,17 @@ impl HttpTransport {
                         .headers()
                         .get("x-request-id")
                         .and_then(|value| value.to_str().ok())
-                        .map(str::to_owned);
+                        .map(|value| self.credentials.redact(value));
                     let retry_after = retry_after(response.headers());
-                    let bytes = read_bounded(&mut response, self.max_response_bytes).await?;
+                    let bytes = read_bounded(&mut response, self.max_response_bytes)
+                        .await
+                        .map_err(|error| {
+                            if error.code() == ErrorCode::ResponseTooLarge {
+                                error.with_status(status.as_u16())
+                            } else {
+                                error
+                            }
+                        })?;
                     let text = String::from_utf8_lossy(&bytes);
                     if !status.is_success() {
                         let safe_text = self.credentials.redact(&text);
@@ -194,6 +202,7 @@ impl HttpTransport {
                             ErrorCode::IncompatibleResponse,
                             format!("SigNoz returned invalid JSON: {error}"),
                         )
+                        .with_status(status.as_u16())
                     })?;
                     return Ok(JsonResponse {
                         value,

@@ -63,14 +63,18 @@ async fn doctor_reports_ordered_healthy_checks_without_exposing_identity_secrets
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/service_accounts/me"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": {
-                "id": "account-id",
-                "name": "automation",
-                "orgId": "org-id",
-                "apiKey": "must-not-be-emitted"
-            }
-        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-request-id", "never-print-this")
+                .set_body_json(json!({
+                    "data": {
+                        "id": "account-id",
+                        "name": "automation",
+                        "orgId": "org-id",
+                        "apiKey": "must-not-be-emitted"
+                    }
+                })),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -94,6 +98,7 @@ async fn doctor_reports_ordered_healthy_checks_without_exposing_identity_secrets
     let envelope: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(envelope["schemaVersion"], "1");
     assert_eq!(envelope["command"], "doctor");
+    assert_eq!(envelope["meta"]["requestId"], "[REDACTED]");
     let checks = envelope["data"].as_array().unwrap();
     assert_eq!(
         checks
@@ -134,6 +139,24 @@ fn doctor_reports_missing_connection_on_stdout_and_exits_with_config_code() {
     assert_eq!(checks[2]["status"], "skipped");
     assert_eq!(checks[3]["status"], "skipped");
     assert_eq!(checks[4]["status"], "skipped");
+}
+
+#[test]
+fn doctor_verbose_keeps_the_report_on_stdout_and_adds_requested_diagnostics() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--verbose", "--output", "json", "doctor"])
+        .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
+        .env_remove("SIGNOZ_URL")
+        .env_remove("SIGNOZ_API_KEY")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["command"], "doctor");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("signoz-cli: command=doctor"));
 }
 
 #[test]
@@ -242,6 +265,56 @@ async fn doctor_reports_malformed_identity_as_incompatible_authentication() {
     Mock::given(method("GET"))
         .and(path("/api/v1/service_accounts/me"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": []})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(7));
+    assert!(output.stderr.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["meta"]["status"], 200);
+    assert_eq!(envelope["data"][3]["status"], "pass");
+    assert_eq!(envelope["data"][4]["status"], "fail");
+}
+
+#[tokio::test]
+async fn doctor_rejects_an_identity_without_a_non_empty_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/service_accounts/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {"id": "   ", "name": 42}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(7));
+    assert!(output.stderr.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["meta"]["status"], 200);
+    assert_eq!(envelope["data"][3]["status"], "pass");
+    assert_eq!(envelope["data"][4]["status"], "fail");
+}
+
+#[tokio::test]
+async fn doctor_treats_non_json_success_as_reachable_but_incompatible_authentication() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/service_accounts/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("not-json"))
         .expect(1)
         .mount(&server)
         .await;

@@ -20,6 +20,9 @@ FORBIDDEN_API_KEY_ARGUMENT = re.compile(
     rf"{_SIGNOZ_CLI_TOKEN}[^\n]*(?:\\\r?\n[^\n]*)*--api-key(?:[ =]|$)",
     re.MULTILINE,
 )
+DISCARDED_DOCTOR_REPORT = re.compile(
+    rf"{_SIGNOZ_CLI_TOKEN}\s+doctor[^\n]*>\s*/dev/null(?:\s|$)",
+)
 
 
 def _json(path: Path, errors: list[str]) -> dict:
@@ -89,6 +92,8 @@ def validate(root: Path) -> list[str]:
         errors.append("skill contains no signoz-cli command")
     if FORBIDDEN_API_KEY_ARGUMENT.search(skill):
         errors.append("skill contains forbidden --api-key argument")
+    if DISCARDED_DOCTOR_REPORT.search(skill):
+        errors.append("skill discards the doctor report instead of handling failure stdout")
     if LEGACY_SIGNOZ_COMMAND.search(skill):
         errors.append("skill contains legacy signoz command")
     if re.search(r"(?:sk|snz)[_-][A-Za-z0-9]{16,}", skill):

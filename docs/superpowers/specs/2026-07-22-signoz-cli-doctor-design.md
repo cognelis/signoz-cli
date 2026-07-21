@@ -38,7 +38,7 @@ Configuration and credential resolution will be split internally into two stages
 
 ## Output and exit contract
 
-A completed diagnostic always writes its report to stdout using the normal versioned success envelope (`command: "doctor"`) or raw/table projection, even when a check fails. Stderr remains empty unless serializing the report itself fails. This deliberate exception lets automation inspect every completed check.
+A completed diagnostic always writes its report to stdout using the normal versioned success envelope (`command: "doctor"`) or raw/table projection, even when a check fails. Stderr remains empty unless serializing the report itself fails or the caller explicitly requests the existing global `--verbose` diagnostic summary. This deliberate exception lets automation inspect every completed check.
 
 After writing the report, the process exits using the existing stable failure categories:
 

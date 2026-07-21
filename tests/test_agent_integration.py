@@ -73,6 +73,12 @@ class AgentIntegrationValidationTest(unittest.TestCase):
                     root, "\nsignoz-cli logs search \\\n  --api-key secret\n"
                 ),
             ),
+            (
+                "discarded doctor report",
+                lambda root: self.append_skill(
+                    root, "\nsignoz-cli doctor --output json >/dev/null\n"
+                ),
+            ),
             ("version mismatch", self.version_mismatch),
             ("missing target", self.missing_target),
             ("trigger overlap", self.trigger_overlap),

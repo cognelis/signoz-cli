@@ -82,6 +82,11 @@ impl ClientError {
     pub fn hint(&self) -> Option<&str> {
         self.hint.as_deref()
     }
+
+    pub(crate) fn with_status(mut self, status: u16) -> Self {
+        self.status = Some(status);
+        self
+    }
 }
 
 #[cfg(test)]

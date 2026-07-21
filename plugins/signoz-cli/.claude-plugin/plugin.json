@@ -1,6 +1,6 @@
 {
   "name": "signoz-cli",
-  "version": "0.1.0+codex.20260721195219",
+  "version": "0.1.0+codex.20260721195815",
   "description": "Use the Rust SigNoz CLI safely in shell, CI, and JSON automation workflows.",
   "author": {
     "name": "signoz-cli contributors"

@@ -283,7 +283,15 @@ async fn run_doctor(cli: &Cli) -> DispatchResult {
             let code = error.code();
             meta.status = error.status();
             meta.elapsed_ms = Some(started.elapsed().as_millis());
-            if matches!(code, ErrorCode::Unauthorized | ErrorCode::Forbidden) {
+            if error
+                .status()
+                .is_some_and(|status| (200..300).contains(&status))
+            {
+                report.api_passed();
+                report.authentication_failed(
+                    "SigNoz returned an incompatible authentication response",
+                );
+            } else if matches!(code, ErrorCode::Unauthorized | ErrorCode::Forbidden) {
                 report.api_passed();
                 report.authentication_failed(match code {
                     ErrorCode::Unauthorized => "the API key was not accepted by SigNoz",
@@ -765,6 +773,16 @@ fn project_auth_identity(response: &mut Value) -> Result<(), AppError> {
                 "SigNoz authentication response did not contain an identity object",
             ))
         })?;
+    if !source
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.trim().is_empty())
+    {
+        return Err(AppError::from(ClientError::new(
+            ErrorCode::IncompatibleResponse,
+            "SigNoz authentication response did not contain a non-empty identity id",
+        )));
+    }
     let mut identity = serde_json::Map::new();
     for field in ["id", "name", "displayName", "email", "orgId"] {
         if let Some(value) = source.get(field).filter(|value| value.is_string()) {
