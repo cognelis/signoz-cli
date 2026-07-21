@@ -64,24 +64,24 @@ Codex / Claude Code（CLI 任务） -> signoz-cli skill -> signoz CLI -> SigNoz 
 - `clap`：命令解析与帮助文本。
 - `reqwest` + `rustls-tls`：HTTP 客户端与 TLS。
 - `tokio`：异步运行时。
-- `serde`、`serde_json`、`serde_yaml`：请求、响应和输出。
+- `serde`、`serde_json`：请求、响应和输出。
 - `thiserror`：稳定的客户端错误分类。
 - `chrono`：RFC 3339 与 Unix 毫秒时间转换。
 - `url`：实例 origin 校验。
 - `directories`：跨平台配置目录。
 - `keyring`：本地 profile 的 API Key 存储；CI 仍使用环境变量。
 - `secrecy`：避免敏感值意外进入 Debug 与日志。
-- `comfy-table`：TTY 表格输出。
-- `tracing`、`tracing-subscriber`：仅向 stderr 输出诊断信息。
-- `wiremock`、`assert_cmd`、`predicates`、`insta`：契约、CLI 和快照测试。
+- 内置轻量表格渲染：TTY 表格输出，不增加额外格式化依赖。
+- `wiremock`、`assert_cmd`、`predicates`：契约和 CLI 测试。
 
 ## 配置与认证
 
 实例与认证按以下优先级解析：
 
-1. `--profile` 选择的 profile；`--url` 可由明确的终端用户临时覆盖实例。
-2. `SIGNOZ_URL` 和 `SIGNOZ_API_KEY`，适用于 CI。
-3. 当前 profile 的实例 URL 与系统密钥环中的 API Key。
+1. 明确的 `--url` 与 `SIGNOZ_API_KEY`，用于一次性实例覆盖。
+2. `--profile` 选择的 profile；若存在 `SIGNOZ_API_KEY` 则使用它，否则读取该 profile 的系统密钥环条目。
+3. `SIGNOZ_URL` 和 `SIGNOZ_API_KEY`，适用于 CI。
+4. 当前 profile 的实例 URL 与系统密钥环中的 API Key。
 
 profile 配置文件位于操作系统标准配置目录下的 `signoz/config.toml`。它只保存 profile 名、实例 origin 和 keyring entry 名，不保存密钥。`signoz auth login --api-key-stdin` 从 stdin 读取 API Key 并写入密钥环，避免密钥出现在 shell 历史。项目不提供 `--api-key` 参数。
 
@@ -97,7 +97,7 @@ profile 配置文件位于操作系统标准配置目录下的 `signoz/config.to
 --profile <name>
 --url <origin>
 --output auto|json|table
---timeout <duration>
+--timeout <seconds>
 --raw
 --verbose
 ```

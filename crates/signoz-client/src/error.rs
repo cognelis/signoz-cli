@@ -9,6 +9,7 @@ pub enum ErrorCode {
     Unauthorized,
     Forbidden,
     NotFound,
+    RequestRejected,
     RateLimited,
     Network,
     Timeout,
@@ -46,6 +47,7 @@ impl ClientError {
             404 if minimum_version.is_some() => ErrorCode::FeatureUnsupported,
             404 => ErrorCode::NotFound,
             429 => ErrorCode::RateLimited,
+            400..=499 => ErrorCode::RequestRejected,
             502..=504 => ErrorCode::Upstream,
             _ => ErrorCode::Upstream,
         };

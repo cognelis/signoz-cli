@@ -83,6 +83,11 @@ impl ConfigFile {
 
     pub fn add_profile(&mut self, name: &str, url: &str) -> Result<(), String> {
         validate_profile_name(name)?;
+        if self.profiles.contains_key(name) {
+            return Err(format!(
+                "profile '{name}' already exists; remove it before using a different URL"
+            ));
+        }
         let origin = SigNozOrigin::parse(url)?;
         self.profiles.insert(
             name.to_owned(),
@@ -123,11 +128,27 @@ impl ConfigFile {
         environment_key: Option<&str>,
         store: &dyn CredentialStore,
     ) -> Result<ResolvedConnection, String> {
-        let env_url = std::env::var("SIGNOZ_URL").ok();
-        if let Some(url) = explicit_url.or(env_url.as_deref()) {
+        let environment_url = std::env::var("SIGNOZ_URL").ok();
+        self.resolve_inputs(
+            explicit_url,
+            selected_profile,
+            environment_url.as_deref(),
+            environment_key,
+            store,
+        )
+    }
+
+    fn resolve_inputs(
+        &self,
+        explicit_url: Option<&str>,
+        selected_profile: Option<&str>,
+        environment_url: Option<&str>,
+        environment_key: Option<&str>,
+        store: &dyn CredentialStore,
+    ) -> Result<ResolvedConnection, String> {
+        if let Some(url) = explicit_url {
             let key = environment_key
                 .map(str::to_owned)
-                .or_else(|| std::env::var("SIGNOZ_API_KEY").ok())
                 .filter(|key| !key.is_empty())
                 .ok_or_else(|| "SIGNOZ_API_KEY is required with --url or SIGNOZ_URL".to_owned())?;
             return Ok(ResolvedConnection {
@@ -136,24 +157,47 @@ impl ConfigFile {
                 profile: None,
             });
         }
-        let profile_name = selected_profile
-            .map(str::to_owned)
-            .or_else(|| self.current_profile.clone())
-            .ok_or_else(|| "no connection: use --url with SIGNOZ_API_KEY or select a profile".to_owned())?;
+        if let Some(profile_name) = selected_profile {
+            return self.resolve_profile(profile_name, environment_key, store);
+        }
+        if let Some(url) = environment_url {
+            let key = environment_key
+                .map(str::to_owned)
+                .filter(|key| !key.is_empty())
+                .ok_or_else(|| "SIGNOZ_API_KEY is required with SIGNOZ_URL".to_owned())?;
+            return Ok(ResolvedConnection {
+                origin: SigNozOrigin::parse(url)?,
+                credentials: Credentials::new(key),
+                profile: None,
+            });
+        }
+        let profile_name = self.current_profile.as_deref().ok_or_else(|| {
+            "no connection: use --url with SIGNOZ_API_KEY or select a profile".to_owned()
+        })?;
+        self.resolve_profile(profile_name, environment_key, store)
+    }
+
+    fn resolve_profile(
+        &self,
+        profile_name: &str,
+        environment_key: Option<&str>,
+        store: &dyn CredentialStore,
+    ) -> Result<ResolvedConnection, String> {
         let profile = self
             .profiles
-            .get(&profile_name)
+            .get(profile_name)
             .ok_or_else(|| format!("profile '{profile_name}' does not exist"))?;
-        let key = environment_key
-            .map(str::to_owned)
-            .or_else(|| std::env::var("SIGNOZ_API_KEY").ok())
-            .or(store.get(&profile_name)?)
-            .filter(|key| !key.is_empty())
-            .ok_or_else(|| format!("profile '{profile_name}' has no API key; run auth login"))?;
+        let key = if let Some(key) = environment_key {
+            Some(key.to_owned())
+        } else {
+            store.get(profile_name)?
+        }
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| format!("profile '{profile_name}' has no API key; run auth login"))?;
         Ok(ResolvedConnection {
             origin: SigNozOrigin::parse(&profile.url)?,
             credentials: Credentials::new(key),
-            profile: Some(profile_name),
+            profile: Some(profile_name.to_owned()),
         })
     }
 }
@@ -204,11 +248,17 @@ mod tests {
         let path = directory.path().join("config.toml");
         let store = MemoryStore::default();
         let mut config = ConfigFile::default();
-        config.add_profile("prod", "https://signoz.example.com").unwrap();
+        config
+            .add_profile("prod", "https://signoz.example.com")
+            .unwrap();
         config.current_profile = Some("prod".into());
         store.set("prod", "never-serialize-this").unwrap();
         config.save(&path).unwrap();
-        assert!(!std::fs::read_to_string(&path).unwrap().contains("never-serialize-this"));
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("never-serialize-this")
+        );
         let resolved = config.resolve(None, None, None, &store).unwrap();
         assert_eq!(resolved.origin.as_str(), "https://signoz.example.com");
         assert!(!format!("{:?}", resolved.credentials).contains("never-serialize-this"));
@@ -222,5 +272,97 @@ mod tests {
         store.set("dev", "secret").unwrap();
         config.remove_profile("dev", &store).unwrap();
         assert_eq!(store.get("dev").unwrap(), None);
+    }
+
+    #[test]
+    fn adding_an_existing_profile_never_rebinds_its_credential_to_a_new_origin() {
+        let store = MemoryStore::default();
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("prod", "https://original.signoz.example.com")
+            .unwrap();
+        store.set("prod", "original-secret").unwrap();
+        let error = config
+            .add_profile("prod", "https://attacker.invalid")
+            .unwrap_err();
+        assert!(error.contains("already exists"));
+        assert_eq!(
+            config.profiles["prod"].url,
+            "https://original.signoz.example.com"
+        );
+        assert_eq!(
+            store.get("prod").unwrap().as_deref(),
+            Some("original-secret")
+        );
+    }
+
+    #[test]
+    fn environment_key_does_not_touch_the_keyring() {
+        struct FailingStore;
+        impl CredentialStore for FailingStore {
+            fn get(&self, _: &str) -> Result<Option<String>, String> {
+                Err("keyring unavailable".into())
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), String> {
+                unreachable!()
+            }
+            fn delete(&self, _: &str) -> Result<(), String> {
+                unreachable!()
+            }
+        }
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("ci", "https://signoz.example.com")
+            .unwrap();
+        let resolved = config
+            .resolve(None, Some("ci"), Some("environment-secret"), &FailingStore)
+            .unwrap();
+        assert_eq!(resolved.profile.as_deref(), Some("ci"));
+    }
+
+    #[test]
+    fn explicit_profile_wins_over_environment_url() {
+        let store = MemoryStore::default();
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("prod", "https://profile.signoz.example.com")
+            .unwrap();
+        let resolved = config
+            .resolve_inputs(
+                None,
+                Some("prod"),
+                Some("https://environment.signoz.example.com"),
+                Some("environment-secret"),
+                &store,
+            )
+            .unwrap();
+        assert_eq!(
+            resolved.origin.as_str(),
+            "https://profile.signoz.example.com"
+        );
+        assert_eq!(resolved.profile.as_deref(), Some("prod"));
+    }
+
+    #[test]
+    fn explicit_url_wins_over_profile_and_environment_url() {
+        let store = MemoryStore::default();
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("prod", "https://profile.signoz.example.com")
+            .unwrap();
+        let resolved = config
+            .resolve_inputs(
+                Some("https://explicit.signoz.example.com"),
+                Some("prod"),
+                Some("https://environment.signoz.example.com"),
+                Some("environment-secret"),
+                &store,
+            )
+            .unwrap();
+        assert_eq!(
+            resolved.origin.as_str(),
+            "https://explicit.signoz.example.com"
+        );
+        assert_eq!(resolved.profile, None);
     }
 }

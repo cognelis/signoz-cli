@@ -109,10 +109,7 @@ mod tests {
             .unwrap()
             .to_utc();
         assert_eq!(
-            TimeWindowArgs::since("1h")
-                .resolve(now)
-                .unwrap()
-                .start_ms,
+            TimeWindowArgs::since("1h").resolve(now).unwrap().start_ms,
             now.timestamp_millis() - 3_600_000
         );
         assert!(

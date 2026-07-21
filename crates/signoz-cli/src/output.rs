@@ -17,6 +17,26 @@ pub struct Meta {
     pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -51,6 +71,8 @@ struct ErrorBody<'a> {
     code: ErrorCode,
     message: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     hint: Option<&'a str>,
 }
 
@@ -62,7 +84,10 @@ pub fn emit_success(
     meta: Meta,
 ) -> Result<(), String> {
     if raw {
-        println!("{}", serde_json::to_string_pretty(&data).map_err(|error| error.to_string())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&data).map_err(|error| error.to_string())?
+        );
         return Ok(());
     }
     let effective = match format {
@@ -86,13 +111,19 @@ pub fn emit_error(
     raw: bool,
     code: ErrorCode,
     message: &str,
+    status: Option<u16>,
     hint: Option<&str>,
 ) {
     let json_mode = raw || matches!(format, OutputFormat::Json) || !io::stderr().is_terminal();
     if json_mode {
         let envelope = ErrorEnvelope {
             schema_version: "1",
-            error: ErrorBody { code, message, hint },
+            error: ErrorBody {
+                code,
+                message,
+                status,
+                hint,
+            },
         };
         eprintln!(
             "{}",
@@ -110,16 +141,21 @@ pub fn emit_error(
 pub fn exit_code(code: ErrorCode) -> i32 {
     match code {
         ErrorCode::Validation => 2,
-        ErrorCode::Unauthorized | ErrorCode::Forbidden => 3,
-        ErrorCode::Config | ErrorCode::NotFound => 4,
-        ErrorCode::Network | ErrorCode::Timeout | ErrorCode::RateLimited | ErrorCode::Upstream => 5,
-        ErrorCode::FeatureUnsupported => 6,
-        ErrorCode::ResponseTooLarge | ErrorCode::IncompatibleResponse => 7,
+        ErrorCode::Config | ErrorCode::Unauthorized | ErrorCode::Forbidden => 3,
+        ErrorCode::Network | ErrorCode::Timeout => 4,
+        ErrorCode::NotFound | ErrorCode::RequestRejected | ErrorCode::RateLimited => 5,
+        ErrorCode::Upstream => 6,
+        ErrorCode::FeatureUnsupported
+        | ErrorCode::ResponseTooLarge
+        | ErrorCode::IncompatibleResponse => 7,
     }
 }
 
 fn print_table(value: &Value) {
-    let rows = value.as_array().cloned().unwrap_or_else(|| vec![value.clone()]);
+    let rows = value
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| vec![value.clone()]);
     if rows.is_empty() {
         println!("(no rows)");
         return;
