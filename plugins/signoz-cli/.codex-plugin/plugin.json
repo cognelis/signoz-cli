@@ -1,6 +1,6 @@
 {
   "name": "signoz-cli",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260721190746",
   "description": "Use the Rust SigNoz CLI safely in shell, CI, and JSON automation workflows.",
   "author": {
     "name": "signoz-cli contributors"
@@ -8,7 +8,12 @@
   "homepage": "https://gitee.com/caspian/signoz-cli",
   "repository": "https://gitee.com/caspian/signoz-cli",
   "license": "Apache-2.0",
-  "keywords": ["signoz", "observability", "cli", "ci"],
+  "keywords": [
+    "signoz",
+    "observability",
+    "cli",
+    "ci"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "SigNoz CLI",
@@ -16,7 +21,9 @@
     "longDescription": "Guides Codex to use the Rust signoz-cli binary with stable JSON, secret-safe authentication, validated time windows, and supported read-only commands.",
     "developerName": "signoz-cli contributors",
     "category": "Developer Tools",
-    "capabilities": ["Read"],
+    "capabilities": [
+      "Read"
+    ],
     "defaultPrompt": [
       "Use the SigNoz CLI to query error logs from the last hour as JSON.",
       "Add a secret-safe SigNoz query step to this CI pipeline."
