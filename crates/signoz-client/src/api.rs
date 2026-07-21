@@ -1,5 +1,6 @@
 use reqwest::Method;
 use serde_json::Value;
+use std::time::Duration;
 
 use crate::{ClientError, Credentials, HttpTransport, JsonResponse, SigNozOrigin};
 
@@ -165,6 +166,16 @@ impl SigNozClient {
     pub fn new(origin: SigNozOrigin, credentials: Credentials) -> Result<Self, ClientError> {
         Ok(Self {
             transport: HttpTransport::new(origin, credentials)?,
+        })
+    }
+
+    pub fn new_with_timeout(
+        origin: SigNozOrigin,
+        credentials: Credentials,
+        timeout: Duration,
+    ) -> Result<Self, ClientError> {
+        Ok(Self {
+            transport: HttpTransport::new_with_timeout(origin, credentials, timeout)?,
         })
     }
 

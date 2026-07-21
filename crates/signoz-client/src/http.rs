@@ -48,8 +48,16 @@ pub struct HttpTransport {
 
 impl HttpTransport {
     pub fn new(origin: SigNozOrigin, credentials: Credentials) -> Result<Self, ClientError> {
+        Self::new_with_timeout(origin, credentials, Duration::from_secs(60))
+    }
+
+    pub fn new_with_timeout(
+        origin: SigNozOrigin,
+        credentials: Credentials,
+        timeout: Duration,
+    ) -> Result<Self, ClientError> {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(timeout)
             .user_agent(concat!("signoz-cli/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|error| ClientError::new(ErrorCode::Config, error.to_string()))?;
