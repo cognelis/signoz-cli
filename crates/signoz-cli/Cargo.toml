@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "signoz"
+name = "signoz-cli"
 path = "src/main.rs"
 
 [dependencies]
@@ -27,4 +27,3 @@ toml.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 wiremock.workspace = true
-

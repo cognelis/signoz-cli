@@ -24,7 +24,7 @@ async fn main() {
                 signoz_client::ErrorCode::Validation,
                 &error.to_string(),
                 None,
-                Some("Run `signoz --help` or the subcommand's `--help`"),
+                Some("Run `signoz-cli --help` or the subcommand's `--help`"),
             );
             std::process::exit(2);
         }
@@ -33,7 +33,7 @@ async fn main() {
         Ok(result) => {
             if cli.verbose {
                 eprintln!(
-                    "signoz: command={} status={} elapsedMs={}",
+                    "signoz-cli: command={} status={} elapsedMs={}",
                     result.command,
                     result.meta.status.unwrap_or_default(),
                     result.meta.elapsed_ms.unwrap_or_default()

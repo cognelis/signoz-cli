@@ -3,7 +3,11 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Clone, Debug, Parser)]
-#[command(name = "signoz", version, about = "Query SigNoz from the command line")]
+#[command(
+    name = "signoz-cli",
+    version,
+    about = "Query SigNoz from the command line"
+)]
 pub struct Cli {
     #[arg(long, global = true)]
     pub profile: Option<String>,
