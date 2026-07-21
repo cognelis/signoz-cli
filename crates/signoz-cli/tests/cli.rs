@@ -28,6 +28,18 @@ fn version_is_independent_of_connection_configuration() {
 }
 
 #[test]
+fn verbose_diagnostics_use_the_executable_name() {
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
+    command
+        .args(["--verbose", "--output", "json", "version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"version\""))
+        .stderr(predicate::str::contains("signoz-cli: command=version"))
+        .stderr(predicate::str::contains("signoz: command=version").not());
+}
+
+#[test]
 fn client_error_codes_have_stable_process_exit_codes() {
     use signoz_client::ErrorCode;
     assert_eq!(signoz_cli::output::exit_code(ErrorCode::Validation), 2);
@@ -1011,7 +1023,11 @@ fn clap_errors_are_structured_when_json_is_requested() {
         .code(2)
         .stdout("")
         .stderr(predicate::str::contains("\"code\": \"validation\""))
-        .stderr(predicate::str::contains("unexpected argument"));
+        .stderr(predicate::str::contains("unexpected argument"))
+        .stderr(predicate::str::contains(
+            "\"hint\": \"Run `signoz-cli --help`",
+        ))
+        .stderr(predicate::str::contains("Run `signoz --help`").not());
 }
 
 #[test]
