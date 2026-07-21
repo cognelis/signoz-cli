@@ -11,10 +11,10 @@ Rust stable is required.
 ```sh
 cargo build --release
 cargo install --path crates/signoz-cli
-signoz version --output json
+signoz-cli version --output json
 ```
 
-The binary is named `signoz`.
+The binary is named `signoz-cli`.
 
 ## Authenticate
 
@@ -24,16 +24,16 @@ For CI and short-lived shells, use environment variables. Keep the API key in th
 set +x
 export SIGNOZ_URL="https://your-signoz.example.com"
 export SIGNOZ_API_KEY="...from a secret store..."
-signoz auth check --output json
+signoz-cli auth check --output json
 ```
 
 For workstation use, profiles store only the instance URL in the operating-system config directory. API keys are stored in the operating-system keyring.
 
 ```sh
-signoz profile add production --url https://your-signoz.example.com
-signoz profile use production
-printf '%s' "$SIGNOZ_API_KEY" | signoz auth login --api-key-stdin
-signoz auth check --output json
+signoz-cli profile add production --url https://your-signoz.example.com
+signoz-cli profile use production
+printf '%s' "$SIGNOZ_API_KEY" | signoz-cli auth login --api-key-stdin
+signoz-cli auth check --output json
 ```
 
 There is intentionally no `--api-key` flag, so the secret does not enter shell history or process listings.
@@ -42,26 +42,26 @@ There is intentionally no `--api-key` flag, so the secret does not enter shell h
 
 ```sh
 # Discover metrics
-signoz --output json metrics list
+signoz-cli --output json metrics list
 
 # Query a metric for the last hour
-signoz --output json metrics query http.server.duration \
+signoz-cli --output json metrics query http.server.duration \
   --since 1h
 
 # Search logs
-signoz --output json logs search \
+signoz-cli --output json logs search \
   --since 1h --filter "severity_text = 'ERROR'"
 
 # Find traces for a service
-signoz --output json traces search \
+signoz-cli --output json traces search \
   --since 30m --filter 'service.name = "checkout"'
 
 # Send a complete Query Builder v5 request
-signoz --output json query run --file request.json
-printf '%s' "$QUERY_JSON" | signoz --output json query run --file -
+signoz-cli --output json query run --file request.json
+printf '%s' "$QUERY_JSON" | signoz-cli --output json query run --file -
 ```
 
-Use `--since` with `ms`, `s`, `m`, `h`, or `d`, or provide both `--start` and `--end` as RFC3339 timestamps or `@<unix-ms>`. The metric query command reads the metric catalog first and derives safe time/spatial aggregation from its type, temporality, and monotonicity; `--aggregation` only overrides the spatial aggregation. Raw searches and ordinary resource lists accept `--limit` and `--offset`; the JSON `meta` reports the resolved time window and pagination state. Log/trace aggregate commands return a single ungrouped scalar, do not accept offsets, and require `--aggregate-on` for functions other than `count` and `rate`. Alert-rule history uses `--cursor`/`meta.nextCursor` instead of offsets. The time-windowed metrics catalog has a limit but no offset: narrow it with `--since`, `--search`, or `--source meter`; a full page is marked `hasMore: true` with no `nextOffset`. Run `signoz --help` and `signoz <group> <command> --help` for the complete command surface.
+Use `--since` with `ms`, `s`, `m`, `h`, or `d`, or provide both `--start` and `--end` as RFC3339 timestamps or `@<unix-ms>`. The metric query command reads the metric catalog first and derives safe time/spatial aggregation from its type, temporality, and monotonicity; `--aggregation` only overrides the spatial aggregation. Raw searches and ordinary resource lists accept `--limit` and `--offset`; the JSON `meta` reports the resolved time window and pagination state. Log/trace aggregate commands return a single ungrouped scalar, do not accept offsets, and require `--aggregate-on` for functions other than `count` and `rate`. Alert-rule history uses `--cursor`/`meta.nextCursor` instead of offsets. The time-windowed metrics catalog has a limit but no offset: narrow it with `--since`, `--search`, or `--source meter`; a full page is marked `hasMore: true` with no `nextOffset`. Run `signoz-cli --help` and `signoz-cli <group> <command> --help` for the complete command surface.
 
 Successful JSON output has a stable versioned envelope:
 

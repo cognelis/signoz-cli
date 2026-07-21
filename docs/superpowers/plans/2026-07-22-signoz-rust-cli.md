@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a tested Rust `signoz` binary that exposes the designed read-only SigNoz API surface with stable JSON output, safe authentication, retries, and explicit compatibility errors.
+**Goal:** Build a tested Rust `signoz-cli` binary that exposes the designed read-only SigNoz API surface with stable JSON output, safe authentication, retries, and explicit compatibility errors.
 
 **Architecture:** A Cargo workspace separates the reusable `signoz-client` HTTP library from the `signoz-cli` command and rendering layer. The client owns URL/time validation, request replay policy, response bounds, API route mapping, and typed errors; the binary owns profiles, keyring integration, clap arguments, output envelopes, and process exit codes.
 
@@ -42,11 +42,11 @@
 
 - [ ] **Step 1: Add workspace manifests and a compile smoke test**
 
-Create the workspace with resolver 2 and two members. Define `signoz-client` as a library and `signoz-cli` with `[[bin]] name = "signoz"`. In `main.rs`, parse no behavior yet and print the package version only when invoked with `--version` through clap derive.
+Create the workspace with resolver 2 and two members. Define `signoz-client` as a library and `signoz-cli` with `[[bin]] name = "signoz-cli"`. In `main.rs`, parse no behavior yet and print the package version only when invoked with `--version` through clap derive.
 
 ```rust
 #[derive(clap::Parser)]
-#[command(name = "signoz", version, about = "Query SigNoz from the command line")]
+#[command(name = "signoz-cli", version, about = "Query SigNoz from the command line")]
 struct Cli {}
 
 fn main() {
@@ -64,7 +64,7 @@ Expected: both crates compile without warnings.
 
 ```bash
 git add Cargo.toml .gitignore crates/signoz-client crates/signoz-cli
-git commit -m "build: bootstrap signoz rust workspace"
+git commit -m "build: bootstrap signoz-cli rust workspace"
 ```
 
 ### Task 2: Validate origins and time windows with TDD
@@ -250,7 +250,7 @@ Expected: every route case and Query Builder case PASS.
 
 ```bash
 git add crates/signoz-client
-git commit -m "feat(client): cover signoz read api"
+git commit -m "feat(client): cover SigNoz read api"
 ```
 
 ### Task 5: Implement profiles and authentication precedence
@@ -357,7 +357,7 @@ Resolve local-only profile commands without constructing a client. For remote co
 
 - [ ] **Step 5: Add parameterized end-to-end command tests**
 
-For every remote subcommand, launch `signoz` with fake `SIGNOZ_URL`/`SIGNOZ_API_KEY`, serve the expected wire response, and assert exit 0 plus `schemaVersion=1`. Add invalid-time, missing-config, unauthorized, timeout, feature-unsupported, raw-query-stdin, and secret-leak tests.
+For every remote subcommand, launch `signoz-cli` with fake `SIGNOZ_URL`/`SIGNOZ_API_KEY`, serve the expected wire response, and assert exit 0 plus `schemaVersion=1`. Add invalid-time, missing-config, unauthorized, timeout, feature-unsupported, raw-query-stdin, and secret-leak tests.
 
 - [ ] **Step 6: Run tests and commit**
 
@@ -397,7 +397,7 @@ Expected: all checks return 0; help lists every command group.
 
 ```bash
 git add README.md Cargo.toml Cargo.lock crates .gitignore
-git commit -m "docs: document signoz cli workflows"
+git commit -m "docs: document signoz-cli workflows"
 ```
 
 ## Plan Self-Review

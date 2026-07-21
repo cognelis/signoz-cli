@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "SigNoz CLI",
     "shortDescription": "Safe SigNoz CLI workflows for shell and CI.",
-    "longDescription": "Guides Codex to use the Rust signoz binary with stable JSON, secret-safe authentication, validated time windows, and supported read-only commands.",
+    "longDescription": "Guides Codex to use the Rust signoz-cli binary with stable JSON, secret-safe authentication, validated time windows, and supported read-only commands.",
     "developerName": "signoz-cli contributors",
     "category": "Developer Tools",
     "capabilities": ["Read"],

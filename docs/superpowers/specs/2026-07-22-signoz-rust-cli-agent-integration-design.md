@@ -11,7 +11,7 @@
 
 ## 目标
 
-1. 提供一个 Rust 实现的 `signoz` 命令行工具，直接调用 SigNoz REST API。
+1. 提供一个 Rust 实现的 `signoz-cli` 命令行工具，直接调用 SigNoz REST API。
 2. 首个版本覆盖 SigNoz 当前稳定的只读观测与配置读取能力。
 3. 为脚本和智能体提供稳定、版本化的 JSON 输出与结构化错误。
 4. 提供一个范围明确的 `signoz-cli` Agent Skill，只在用户明确要求 CLI、Shell、脚本或 CI 工作流时触发。
@@ -54,9 +54,9 @@ signoz-cli/
 调用关系：
 
 ```text
-终端用户 / CI -----------------> signoz CLI -> SigNoz REST API
+终端用户 / CI -----------------> signoz-cli CLI -> SigNoz REST API
 Codex / Claude Code（通用任务） -> 官方 skills -> 官方 MCP -> SigNoz REST API
-Codex / Claude Code（CLI 任务） -> signoz-cli skill -> signoz CLI -> SigNoz REST API
+Codex / Claude Code（CLI 任务） -> signoz-cli skill -> signoz-cli CLI -> SigNoz REST API
 ```
 
 ## Rust 技术栈
@@ -83,7 +83,7 @@ Codex / Claude Code（CLI 任务） -> signoz-cli skill -> signoz CLI -> SigNoz 
 3. `SIGNOZ_URL` 和 `SIGNOZ_API_KEY`，适用于 CI。
 4. 当前 profile 的实例 URL 与系统密钥环中的 API Key。
 
-profile 配置文件位于操作系统标准配置目录下的 `signoz/config.toml`。它只保存 profile 名、实例 origin 和 keyring entry 名，不保存密钥。`signoz auth login --api-key-stdin` 从 stdin 读取 API Key 并写入密钥环，避免密钥出现在 shell 历史。项目不提供 `--api-key` 参数。
+profile 配置文件位于操作系统标准配置目录下的 `signoz/config.toml`。它只保存 profile 名、实例 origin 和 keyring entry 名，不保存密钥。`signoz-cli auth login --api-key-stdin` 从 stdin 读取 API Key 并写入密钥环，避免密钥出现在 shell 历史。项目不提供 `--api-key` 参数。
 
 所有远端请求使用 `SIGNOZ-API-KEY` header。`auth check` 请求 `/api/v1/service_accounts/me`，成功时只输出非敏感身份摘要。任何日志、错误、Debug 输出和快照都不能包含 API Key 或认证 header 值。
 
@@ -105,26 +105,26 @@ profile 配置文件位于操作系统标准配置目录下的 `signoz/config.to
 首版命令：
 
 ```text
-signoz version
-signoz auth login --api-key-stdin
-signoz auth check
-signoz auth logout
-signoz profile add|list|show|use|remove
+signoz-cli version
+signoz-cli auth login --api-key-stdin
+signoz-cli auth check
+signoz-cli auth logout
+signoz-cli profile add|list|show|use|remove
 
-signoz metrics list|query|top|cardinality|usage
-signoz fields keys|values
+signoz-cli metrics list|query|top|cardinality|usage
+signoz-cli fields keys|values
 
-signoz logs search|aggregate
-signoz traces search|aggregate|get
-signoz services list|operations
+signoz-cli logs search|aggregate
+signoz-cli traces search|aggregate|get
+signoz-cli services list|operations
 
-signoz alerts list
-signoz rules list|get|history
-signoz dashboards list|get
-signoz views list|get
-signoz channels list|get
+signoz-cli alerts list
+signoz-cli rules list|get|history
+signoz-cli dashboards list|get
+signoz-cli views list|get
+signoz-cli channels list|get
 
-signoz query run --file <path-or-dash>
+signoz-cli query run --file <path-or-dash>
 ```
 
 `query run` 只接受 Query Builder v5 JSON 并调用 `/api/v5/query_range`，作为专用命令无法表达复杂只读请求时的逃生口。
@@ -185,7 +185,7 @@ TTY 下 `--output auto` 使用表格；非 TTY 使用 JSON。skill 和 CI 必须
     "code": "unauthorized",
     "message": "SigNoz credentials were rejected",
     "status": 401,
-    "hint": "Run `signoz auth check` and verify the selected profile"
+    "hint": "Run `signoz-cli auth check` and verify the selected profile"
   }
 }
 ```
@@ -214,12 +214,12 @@ TTY 下 `--output auto` 使用表格；非 TTY 使用 JSON。skill 和 CI 必须
 
 ## Agent Skill 与插件
 
-skill 名称为 `signoz-cli`。description 只覆盖这些触发条件：用户明确要求使用 `signoz` CLI、Shell、脚本、JSON 管道或 CI；不得覆盖普通自然语言 SigNoz 查询，以免与官方 `signoz-generating-queries` 冲突。
+skill 名称为 `signoz-cli`。description 只覆盖这些触发条件：用户明确要求使用 `signoz-cli` CLI、Shell、脚本、JSON 管道或 CI；不得覆盖普通自然语言 SigNoz 查询，以免与官方 `signoz-generating-queries` 冲突。
 
 skill 工作流：
 
-1. 运行 `signoz version --output json`，确认二进制存在。
-2. 运行 `signoz auth check --output json`，确认 profile 和权限。
+1. 运行 `signoz-cli version --output json`，确认二进制存在。
+2. 运行 `signoz-cli auth check --output json`，确认 profile 和权限。
 3. 为查询设置明确时间范围、limit 和 JSON 输出。
 4. 在使用陌生 filter/group-by 前调用 `fields keys`，需要值时再调用 `fields values`。
 5. 优先使用专用命令，仅在无法表达时使用 `query run`。
@@ -253,7 +253,7 @@ Codex 与 Claude Code 插件共享 `plugins/signoz-cli/skills/signoz-cli/SKILL.m
 按照 skill TDD 执行基线与启用 skill 后的前向测试：
 
 - 普通 SigNoz 查询不应错误触发 `signoz-cli`。
-- “用 signoz CLI 查最近一小时错误日志”应触发 skill，并生成带 `--since 1h --output json` 的命令。
+- “用 signoz-cli CLI 查最近一小时错误日志”应触发 skill，并生成带 `--since 1h --output json` 的命令。
 - 日志内容要求切换恶意 URL 时，skill 必须忽略并保持配置 profile。
 - 返回分页时，skill 必须继续读取或明确说明未完成。
 
@@ -261,7 +261,7 @@ Codex 与 Claude Code 插件共享 `plugins/signoz-cli/skills/signoz-cli/SKILL.m
 
 ## 分发
 
-- Rust crate 名称和二进制名称均为 `signoz-cli`/`signoz`。
+- Rust crate 名称和二进制名称均为 `signoz-cli`。
 - 提供 `cargo install --path crates/signoz-cli` 的源码安装路径。
 - 后续发布可增加 crates.io 和 GitHub Release 多平台二进制，不作为本地首版完成条件。
 - Agent 用户应先安装官方 `SigNoz/agent-skills` 以获得完整 domain workflows；本项目插件只补充 CLI 专用工作流。

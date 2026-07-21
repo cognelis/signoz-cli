@@ -38,8 +38,8 @@ Include these exact behavioral expectations:
 [
   {
     "id": "explicit-cli-query",
-    "prompt": "Use the signoz CLI to find ERROR logs from the last hour and return JSON.",
-    "mustInclude": ["signoz", "logs", "search", "--since", "1h", "--output", "json"]
+    "prompt": "Use the signoz-cli executable to find ERROR logs from the last hour and return JSON.",
+    "mustInclude": ["signoz-cli", "logs", "search", "--since", "1h", "--output", "json"]
   },
   {
     "id": "ordinary-signoz-query",
@@ -67,7 +67,7 @@ Execute the four prompts in a clean agent context without loading a SigNoz CLI s
 
 ```bash
 git add tests/skill
-git commit -m "test(skill): record signoz cli baselines"
+git commit -m "test(skill): record signoz-cli baselines"
 ```
 
 ### Task 2: Write the minimal CLI-only skill
@@ -83,7 +83,7 @@ Use this frontmatter scope:
 ```yaml
 ---
 name: signoz-cli
-description: Use when the user explicitly asks to use the signoz command-line interface, shell commands, JSON pipelines, scripts, or CI automation for SigNoz; do not use for ordinary natural-language SigNoz investigation when the official SigNoz MCP skills are available.
+description: Use when the user explicitly asks to use the signoz-cli command-line interface, shell commands, JSON pipelines, scripts, or CI automation for SigNoz; do not use for ordinary natural-language SigNoz investigation when the official SigNoz MCP skills are available.
 ---
 ```
 
@@ -91,7 +91,7 @@ The body must require version/auth preflight, explicit `--since` or absolute ran
 
 - [ ] **Step 2: Add Codex UI metadata**
 
-Create `agents/openai.yaml` with display name `SigNoz CLI`, a short description under 80 characters, and default prompt `$signoz-cli Use the signoz CLI to query this SigNoz environment safely.` Do not declare an MCP dependency because this skill calls the local CLI.
+Create `agents/openai.yaml` with display name `SigNoz CLI`, a short description under 80 characters, and default prompt `$signoz-cli Use the signoz-cli executable to query this SigNoz environment safely.` Do not declare an MCP dependency because this skill calls the local CLI.
 
 - [ ] **Step 3: Run enabled-skill scenarios and verify GREEN**
 
@@ -101,7 +101,7 @@ Run the same four prompts with the skill explicitly available. Verify the explic
 
 ```bash
 git add plugins/signoz-cli/skills/signoz-cli
-git commit -m "feat(skill): add signoz cli workflow"
+git commit -m "feat(skill): add signoz-cli workflow"
 ```
 
 ### Task 3: Package Codex and Claude Code plugins
@@ -137,7 +137,7 @@ Expected: every command exits 0 and prints normalized JSON.
 
 ```bash
 git add plugins/signoz-cli/.codex-plugin plugins/signoz-cli/.claude-plugin .agents .claude-plugin
-git commit -m "feat(plugin): package signoz cli for codex and claude"
+git commit -m "feat(plugin): package signoz-cli for codex and claude"
 ```
 
 ### Task 4: Add deterministic integration validation
@@ -148,7 +148,7 @@ git commit -m "feat(plugin): package signoz cli for codex and claude"
 
 - [ ] **Step 1: Write failing validator tests**
 
-Create temporary broken fixtures and assert the validator rejects: missing `name`, name/directory mismatch, description over 1024 characters, absent `signoz` command, forbidden `--api-key`, plugin version mismatch, missing marketplace target, and ordinary-query trigger language that overlaps the official skill.
+Create temporary broken fixtures and assert the validator rejects: missing `name`, name/directory mismatch, description over 1024 characters, absent `signoz-cli` command, forbidden `--api-key`, plugin version mismatch, missing marketplace target, and ordinary-query trigger language that overlaps the official skill.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -158,7 +158,7 @@ Expected: FAIL because the validator does not exist.
 
 - [ ] **Step 3: Implement the validator**
 
-Use only Python standard-library `json`, `pathlib`, `re`, and `unittest`. Parse YAML frontmatter with a small two-field parser rather than adding PyYAML. Validate referenced paths, matching versions, exact skill name, required safety phrases, command names against `signoz --help` text when the binary is supplied, and scan all plugin/skill files for `--api-key` or realistic secret examples.
+Use only Python standard-library `json`, `pathlib`, `re`, and `unittest`. Parse YAML frontmatter with a small two-field parser rather than adding PyYAML. Validate referenced paths, matching versions, exact skill name, required safety phrases, command names against `signoz-cli --help` text when the binary is supplied, and scan all plugin/skill files for `--api-key` or realistic secret examples.
 
 - [ ] **Step 4: Run tests and live validation**
 
@@ -209,7 +209,7 @@ Expected: all deterministic skill/plugin and Rust checks PASS.
 
 ```bash
 git add README.md plugins .agents .claude-plugin scripts tests
-git commit -m "docs: add codex and claude signoz cli setup"
+git commit -m "docs: add codex and claude signoz-cli setup"
 ```
 
 ## Plan Self-Review
