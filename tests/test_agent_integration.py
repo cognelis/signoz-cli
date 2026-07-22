@@ -42,6 +42,12 @@ class AgentIntegrationValidationTest(unittest.TestCase):
                 lambda root: self.replace(root, "signoz-cli doctor", "signoz-cli inspect"),
             ),
             (
+                "missing installer workflow",
+                lambda root: self.replace(
+                    root, "signoz-cli skills install", "signoz-cli plugin install"
+                ),
+            ),
+            (
                 "forbidden key flag",
                 lambda root: self.append_skill(root, "\nsignoz-cli --api-key secret\n"),
             ),

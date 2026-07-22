@@ -96,6 +96,7 @@ Successful JSON output has a stable versioned envelope:
 ```text
 version
 doctor
+skills install [--target all|codex|claude]
 auth login|check|logout
 profile add|list|show|use|remove
 metrics list|query|top|cardinality|usage
@@ -127,7 +128,20 @@ Exit codes are stable:
 
 ## Install the agent skill
 
-The same skill directory is packaged for both agents at `plugins/signoz-cli/skills/signoz-cli`.
+```sh
+# Install for both Codex and Claude Code (default)
+signoz-cli skills install
+# Install only for Codex
+signoz-cli skills install --target codex
+# Install only for Claude Code
+signoz-cli skills install --target claude
+```
+
+Without `--target`, the command installs the skill for both agents. Select `codex` or `claude` to install only for that agent. The operation is local and idempotent: it needs no SigNoz URL or API key, updates embedded managed files when rerun, and preserves unrelated files in the target skill directory.
+
+### Advanced: plugin lifecycle alternatives
+
+The same skill directory is packaged for both agents at `plugins/signoz-cli/skills/signoz-cli`. Use the plugin lifecycle instead when you want the repository marketplace installation.
 
 For Codex, add this repository as a marketplace and install `signoz-cli` in the Plugins UI:
 

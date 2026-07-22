@@ -74,6 +74,9 @@ def validate(root: Path) -> list[str]:
     required = [
         "signoz-cli version",
         "signoz-cli doctor",
+        "signoz-cli skills install",
+        "--target codex",
+        "--target claude",
         "signoz-cli auth check",
         "--output json",
         "--since",

@@ -13,6 +13,19 @@ Use the `signoz-cli` binary for repeatable read-only SigNoz operations in termin
 - For ordinary agent-led observability work, use the official `SigNoz/agent-skills` workflows backed by `signoz-mcp-server`. Do not replace their MCP calls with this CLI.
 - Do not call SigNoz with raw HTTP when the CLI already exposes the operation.
 
+## Install the skill locally
+
+```sh
+# Install for both Codex and Claude Code (default)
+signoz-cli skills install
+# Install only for Codex
+signoz-cli skills install --target codex
+# Install only for Claude Code
+signoz-cli skills install --target claude
+```
+
+This operation is local, idempotent, and needs no SigNoz URL or API key. Rerunning it updates the embedded managed files and preserves unrelated files in the target skill directories.
+
 ## Mandatory preflight
 
 For every remote CLI workflow, run the diagnostic preflight before the first data query, even when the API key and URL are already present in the environment:
@@ -54,6 +67,7 @@ Never add an API key to a command-line flag. The CLI deliberately provides no `-
 ```text
 signoz-cli version
 signoz-cli doctor
+signoz-cli skills install [--target all|codex|claude]
 signoz-cli auth login|check|logout
 signoz-cli profile add|list|show|use|remove
 signoz-cli metrics list|query|top|cardinality|usage
