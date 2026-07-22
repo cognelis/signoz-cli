@@ -3,3 +3,4 @@ pub mod config;
 pub mod dispatch;
 pub mod doctor;
 pub mod output;
+pub mod skill_install;
