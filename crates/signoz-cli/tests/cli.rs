@@ -7,6 +7,15 @@ use signoz_cli::output::{Meta, SuccessEnvelope};
 use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+const CANONICAL_SKILL: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../plugins/signoz-cli/skills/signoz-cli/SKILL.md"
+));
+const CANONICAL_OPENAI_METADATA: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../plugins/signoz-cli/skills/signoz-cli/agents/openai.yaml"
+));
+
 fn skill_command(home: &Path, claude_config: &Path) -> Command {
     let config = home.join("broken.toml");
     std::fs::write(&config, "not valid = [").unwrap();
@@ -21,39 +30,160 @@ fn skill_command(home: &Path, claude_config: &Path) -> Command {
     command
 }
 
-#[test]
-fn skills_install_accepts_the_default_target() {
-    let home = tempfile::tempdir().unwrap();
-    let claude_config = tempfile::tempdir().unwrap();
+fn run_skill_install(home: &Path, claude_config: &Path, target: Option<&str>) -> serde_json::Value {
+    let mut command = skill_command(home, claude_config);
+    command.args(["--output", "json", "skills", "install"]);
+    if let Some(target) = target {
+        command.args(["--target", target]);
+    }
+    let output = command.output().unwrap();
 
-    skill_command(home.path(), claude_config.path())
-        .args(["--output", "json", "skills", "install"])
-        .assert()
-        .success();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    serde_json::from_slice(&output.stdout).unwrap()
 }
 
 #[test]
-fn skills_install_accepts_the_codex_target() {
+fn skills_install_default_installs_codex_then_claude() {
     let home = tempfile::tempdir().unwrap();
     let claude_config = tempfile::tempdir().unwrap();
+    let codex_target = home.path().join(".agents/skills/signoz-cli");
+    let claude_target = claude_config.path().join("skills/signoz-cli");
 
-    skill_command(home.path(), claude_config.path())
-        .args(["--output", "json", "skills", "install", "--target", "codex"])
-        .assert()
-        .success();
-}
+    let envelope = run_skill_install(home.path(), claude_config.path(), None);
 
-#[test]
-fn skills_install_accepts_the_claude_target() {
-    let home = tempfile::tempdir().unwrap();
-    let claude_config = tempfile::tempdir().unwrap();
-
-    skill_command(home.path(), claude_config.path())
-        .args([
-            "--output", "json", "skills", "install", "--target", "claude",
+    assert_eq!(envelope["schemaVersion"], "1");
+    assert_eq!(envelope["command"], "skills.install");
+    assert_eq!(
+        envelope["data"],
+        json!([
+            {
+                "agent": "codex",
+                "path": codex_target.display().to_string(),
+                "status": "installed"
+            },
+            {
+                "agent": "claude",
+                "path": claude_target.display().to_string(),
+                "status": "installed"
+            }
         ])
-        .assert()
-        .success();
+    );
+    assert_eq!(
+        std::fs::read(codex_target.join("SKILL.md")).unwrap(),
+        CANONICAL_SKILL
+    );
+    assert_eq!(
+        std::fs::read(codex_target.join("agents/openai.yaml")).unwrap(),
+        CANONICAL_OPENAI_METADATA
+    );
+    assert_eq!(
+        std::fs::read(claude_target.join("SKILL.md")).unwrap(),
+        CANONICAL_SKILL
+    );
+    assert!(!claude_target.join("agents/openai.yaml").exists());
+}
+
+#[test]
+fn skills_install_codex_target_installs_only_codex() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+    let codex_target = home.path().join(".agents/skills/signoz-cli");
+    let claude_target = claude_config.path().join("skills/signoz-cli");
+
+    let envelope = run_skill_install(home.path(), claude_config.path(), Some("codex"));
+
+    assert_eq!(
+        envelope["data"],
+        json!([{
+            "agent": "codex",
+            "path": codex_target.display().to_string(),
+            "status": "installed"
+        }])
+    );
+    assert_eq!(
+        std::fs::read(codex_target.join("SKILL.md")).unwrap(),
+        CANONICAL_SKILL
+    );
+    assert!(!claude_target.exists());
+}
+
+#[test]
+fn skills_install_claude_target_installs_only_claude() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+    let codex_target = home.path().join(".agents/skills/signoz-cli");
+    let claude_target = claude_config.path().join("skills/signoz-cli");
+
+    let envelope = run_skill_install(home.path(), claude_config.path(), Some("claude"));
+
+    assert_eq!(
+        envelope["data"],
+        json!([{
+            "agent": "claude",
+            "path": claude_target.display().to_string(),
+            "status": "installed"
+        }])
+    );
+    assert_eq!(
+        std::fs::read(claude_target.join("SKILL.md")).unwrap(),
+        CANONICAL_SKILL
+    );
+    assert!(!codex_target.exists());
+}
+
+#[test]
+fn skills_install_codex_reports_updated_then_unchanged() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+    let codex_target = home.path().join(".agents/skills/signoz-cli");
+    std::fs::create_dir_all(&codex_target).unwrap();
+    std::fs::write(codex_target.join("SKILL.md"), "stale Skill").unwrap();
+
+    let updated = run_skill_install(home.path(), claude_config.path(), Some("codex"));
+
+    assert_eq!(updated["data"][0]["status"], "updated");
+    assert_eq!(
+        std::fs::read(codex_target.join("SKILL.md")).unwrap(),
+        CANONICAL_SKILL
+    );
+
+    let unchanged = run_skill_install(home.path(), claude_config.path(), Some("codex"));
+
+    assert_eq!(unchanged["data"][0]["status"], "unchanged");
+}
+
+#[test]
+fn skills_install_filesystem_failure_is_a_structured_config_error() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join(".agents"), "not a directory").unwrap();
+
+    let output = skill_command(home.path(), claude_config.path())
+        .args(["--output", "json", "skills", "install", "--target", "codex"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stderr.contains("panicked"));
+    let envelope: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(envelope["schemaVersion"], "1");
+    assert_eq!(envelope["error"]["code"], "config");
+    assert!(
+        envelope["error"]["message"].as_str().unwrap().contains(
+            &home
+                .path()
+                .join(".agents/skills/signoz-cli")
+                .display()
+                .to_string()
+        )
+    );
 }
 
 #[test]

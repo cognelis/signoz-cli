@@ -87,6 +87,19 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     if matches!(&cli.command, Command::Doctor) {
         return Ok(run_doctor(cli).await);
     }
+    if let Command::Skills {
+        command: SkillsCommand::Install { target },
+    } = &cli.command
+    {
+        let results = crate::skill_install::install(*target).map_err(AppError::config)?;
+        return Ok(DispatchResult {
+            command: "skills.install".into(),
+            data: serde_json::to_value(results)
+                .expect("Skill installer result paths are guaranteed strings"),
+            meta: Meta::default(),
+            failure_code: None,
+        });
+    }
     let now = Utc::now();
     let path = config_path()?;
     let mut config = ConfigFile::load(&path).map_err(AppError::config)?;
