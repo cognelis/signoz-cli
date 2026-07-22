@@ -38,7 +38,7 @@ pub enum InstallStatus {
 #[serde(rename_all = "camelCase")]
 pub struct InstallResult {
     pub agent: Agent,
-    pub path: PathBuf,
+    pub path: String,
     pub status: InstallStatus,
 }
 
@@ -158,7 +158,7 @@ fn install_target(target: &InstallTarget) -> Result<InstallResult, String> {
     if changes.is_empty() {
         return Ok(InstallResult {
             agent: target.agent,
-            path: target.directory.clone(),
+            path: target.directory.to_string_lossy().into_owned(),
             status: InstallStatus::Unchanged,
         });
     }
@@ -177,7 +177,7 @@ fn install_target(target: &InstallTarget) -> Result<InstallResult, String> {
 
     Ok(InstallResult {
         agent: target.agent,
-        path: target.directory.clone(),
+        path: target.directory.to_string_lossy().into_owned(),
         status: if skill_was_present {
             InstallStatus::Updated
         } else {
@@ -351,5 +351,58 @@ mod tests {
         assert_eq!(value[1]["status"], "installed");
         assert_eq!(value[0].as_object().unwrap().len(), 3);
         assert_eq!(value[1].as_object().unwrap().len(), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn result_path_serializes_when_target_path_is_not_utf8() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let home = root
+            .path()
+            .join(OsString::from_vec(vec![b'h', b'o', b'm', b'e', 0xff]));
+        let targets = resolve_targets(SkillTarget::Codex, Some(&home), None).unwrap();
+
+        #[cfg(not(target_os = "macos"))]
+        let results = install_targets(&targets).unwrap();
+
+        // macOS rejects invalid UTF-8 in filesystem operations, so install into
+        // the valid temporary root before exercising the resolved report path.
+        #[cfg(target_os = "macos")]
+        let results = {
+            use std::path::PathBuf;
+
+            trait ReportPathForTest {
+                fn from_directory(directory: &Path) -> Self;
+            }
+
+            impl ReportPathForTest for PathBuf {
+                fn from_directory(directory: &Path) -> Self {
+                    directory.to_path_buf()
+                }
+            }
+
+            impl ReportPathForTest for String {
+                fn from_directory(directory: &Path) -> Self {
+                    directory.to_string_lossy().into_owned()
+                }
+            }
+
+            let install_targets_resolved =
+                resolve_targets(SkillTarget::Codex, Some(root.path()), None).unwrap();
+            let mut results = install_targets(&install_targets_resolved).unwrap();
+            results[0].path = ReportPathForTest::from_directory(&targets[0].directory);
+            results
+        };
+
+        let value = serde_json::to_value(&results)
+            .expect("reported paths use a guaranteed UTF-8 representation");
+
+        assert!(value[0]["path"].is_string());
+        assert_eq!(
+            value[0]["path"].as_str(),
+            Some(targets[0].directory.to_string_lossy().as_ref())
+        );
     }
 }
