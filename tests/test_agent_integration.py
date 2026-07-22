@@ -31,6 +31,29 @@ class AgentIntegrationValidationTest(unittest.TestCase):
     def test_live_tree_is_valid(self) -> None:
         self.assertEqual(VALIDATOR.validate(ROOT), [])
 
+    def test_rejects_each_missing_exact_install_command(self) -> None:
+        commands = [
+            "signoz-cli skills install",
+            "signoz-cli skills install --target codex",
+            "signoz-cli skills install --target claude",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                temporary, root = self.fixture()
+                try:
+                    replacement = (
+                        "signoz-cli skills installer"
+                        if command == "signoz-cli skills install"
+                        else f"{command} extra"
+                    )
+                    self.replace(root, command, replacement)
+                    self.assertIn(
+                        f"skill missing required install command: {command}",
+                        VALIDATOR.validate(root),
+                    )
+                finally:
+                    temporary.cleanup()
+
     def test_rejects_broken_skill_and_manifest_contracts(self) -> None:
         mutations = [
             ("missing name", lambda root: self.replace(root, "name: signoz-cli", "name:")),

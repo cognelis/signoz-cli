@@ -23,6 +23,26 @@ FORBIDDEN_API_KEY_ARGUMENT = re.compile(
 DISCARDED_DOCTOR_REPORT = re.compile(
     rf"{_SIGNOZ_CLI_TOKEN}\s+doctor[^\n]*>\s*/dev/null(?:\s|$)",
 )
+REQUIRED_INSTALL_COMMANDS = (
+    (
+        "signoz-cli skills install",
+        re.compile(r"^[ \t]*signoz-cli[ \t]+skills[ \t]+install[ \t]*$", re.MULTILINE),
+    ),
+    (
+        "signoz-cli skills install --target codex",
+        re.compile(
+            r"^[ \t]*signoz-cli[ \t]+skills[ \t]+install[ \t]+--target[ \t]+codex[ \t]*$",
+            re.MULTILINE,
+        ),
+    ),
+    (
+        "signoz-cli skills install --target claude",
+        re.compile(
+            r"^[ \t]*signoz-cli[ \t]+skills[ \t]+install[ \t]+--target[ \t]+claude[ \t]*$",
+            re.MULTILINE,
+        ),
+    ),
+)
 
 
 def _json(path: Path, errors: list[str]) -> dict:
@@ -74,9 +94,6 @@ def validate(root: Path) -> list[str]:
     required = [
         "signoz-cli version",
         "signoz-cli doctor",
-        "signoz-cli skills install",
-        "--target codex",
-        "--target claude",
         "signoz-cli auth check",
         "--output json",
         "--since",
@@ -91,6 +108,9 @@ def validate(root: Path) -> list[str]:
     for token in required:
         if token not in skill:
             errors.append(f"skill missing required workflow token: {token}")
+    for command, pattern in REQUIRED_INSTALL_COMMANDS:
+        if not pattern.search(skill):
+            errors.append(f"skill missing required install command: {command}")
     if not SIGNOZ_CLI_COMMAND.search(skill):
         errors.append("skill contains no signoz-cli command")
     if FORBIDDEN_API_KEY_ARGUMENT.search(skill):
