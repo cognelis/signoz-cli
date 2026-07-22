@@ -87,11 +87,12 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     if matches!(&cli.command, Command::Doctor) {
         return Ok(run_doctor(cli).await);
     }
-    if let Command::Skills {
-        command: SkillsCommand::Install { target },
-    } = &cli.command
-    {
-        let results = crate::skill_install::install(*target).map_err(AppError::config)?;
+    if let Command::Skills { command } = &cli.command {
+        let results = match command {
+            SkillsCommand::Install { target } => {
+                crate::skill_install::install(*target).map_err(AppError::config)?
+            }
+        };
         return Ok(DispatchResult {
             command: "skills.install".into(),
             data: serde_json::to_value(results)

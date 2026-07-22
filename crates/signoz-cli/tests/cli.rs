@@ -48,7 +48,7 @@ fn run_skill_install(home: &Path, claude_config: &Path, target: Option<&str>) ->
 }
 
 #[test]
-fn skills_install_default_installs_codex_then_claude() {
+fn skill_install_default_installs_codex_then_claude() {
     let home = tempfile::tempdir().unwrap();
     let claude_config = tempfile::tempdir().unwrap();
     let codex_target = home.path().join(".agents/skills/signoz-cli");
@@ -89,7 +89,7 @@ fn skills_install_default_installs_codex_then_claude() {
 }
 
 #[test]
-fn skills_install_codex_target_installs_only_codex() {
+fn skill_install_codex_target_installs_only_codex() {
     let home = tempfile::tempdir().unwrap();
     let claude_config = tempfile::tempdir().unwrap();
     let codex_target = home.path().join(".agents/skills/signoz-cli");
@@ -113,7 +113,7 @@ fn skills_install_codex_target_installs_only_codex() {
 }
 
 #[test]
-fn skills_install_claude_target_installs_only_claude() {
+fn skill_install_claude_target_installs_only_claude() {
     let home = tempfile::tempdir().unwrap();
     let claude_config = tempfile::tempdir().unwrap();
     let codex_target = home.path().join(".agents/skills/signoz-cli");
@@ -137,7 +137,7 @@ fn skills_install_claude_target_installs_only_claude() {
 }
 
 #[test]
-fn skills_install_codex_reports_updated_then_unchanged() {
+fn skill_install_codex_reports_updated_then_unchanged() {
     let home = tempfile::tempdir().unwrap();
     let claude_config = tempfile::tempdir().unwrap();
     let codex_target = home.path().join(".agents/skills/signoz-cli");
@@ -158,7 +158,7 @@ fn skills_install_codex_reports_updated_then_unchanged() {
 }
 
 #[test]
-fn skills_install_filesystem_failure_is_a_structured_config_error() {
+fn skill_install_filesystem_failure_is_a_structured_config_error() {
     let home = tempfile::tempdir().unwrap();
     let claude_config = tempfile::tempdir().unwrap();
     std::fs::write(home.path().join(".agents"), "not a directory").unwrap();
@@ -187,7 +187,7 @@ fn skills_install_filesystem_failure_is_a_structured_config_error() {
 }
 
 #[test]
-fn skills_install_rejects_an_unknown_target() {
+fn skill_install_rejects_an_unknown_target() {
     let home = tempfile::tempdir().unwrap();
     let claude_config = tempfile::tempdir().unwrap();
 
