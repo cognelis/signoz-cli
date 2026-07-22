@@ -344,4 +344,4 @@ Inspect `git status`, `git diff --stat`, and the full diff; fast-forward `main` 
 
 - [ ] **Step 5: Reinstall both local plugins and inspect installed Skill files**
 
-From the updated main checkout, use `codex plugin add signoz-cli@personal` and the existing non-interactive Claude plugin installation command, then verify each installed cache contains the updated `SKILL.md`.
+From the updated main checkout, use `codex plugin add signoz-cli@signoz-cli` and the existing non-interactive Claude plugin installation command, then verify each installed cache contains the updated `SKILL.md`.
