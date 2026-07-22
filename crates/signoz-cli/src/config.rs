@@ -111,6 +111,29 @@ impl ConfigFile {
         Ok(())
     }
 
+    pub fn update_profile(&mut self, name: &str, url: &str) -> Result<(), String> {
+        validate_profile_name(name)?;
+        if !self.profiles.contains_key(name) {
+            return Err(format!("profile '{name}' does not exist"));
+        }
+        let origin = SigNozOrigin::parse(url)?;
+        self.profiles.insert(
+            name.to_owned(),
+            ProfileConfig {
+                url: origin.to_string(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn upsert_profile(&mut self, name: &str, url: &str) -> Result<(), String> {
+        if self.profiles.contains_key(name) {
+            self.update_profile(name, url)
+        } else {
+            self.add_profile(name, url)
+        }
+    }
+
     pub fn use_profile(&mut self, name: &str) -> Result<(), String> {
         if !self.profiles.contains_key(name) {
             return Err(format!("profile '{name}' does not exist"));
@@ -232,7 +255,7 @@ impl ConfigFile {
             });
         }
         let profile_name = self.current_profile.as_deref().ok_or_else(|| {
-            "no connection: use --url with SIGNOZ_API_KEY or select a profile".to_owned()
+            "no connection: run `signoz-cli init`, or use --url with SIGNOZ_API_KEY".to_owned()
         })?;
         self.resolve_profile_target(profile_name)
     }
@@ -256,7 +279,7 @@ pub fn default_config_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "unable to determine the operating-system config directory".to_owned())
 }
 
-fn validate_profile_name(name: &str) -> Result<(), String> {
+pub(crate) fn validate_profile_name(name: &str) -> Result<(), String> {
     if name.is_empty()
         || !name
             .chars()
@@ -341,6 +364,26 @@ mod tests {
         assert_eq!(
             store.get("prod").unwrap().as_deref(),
             Some("original-secret")
+        );
+    }
+
+    #[test]
+    fn upsert_profile_adds_and_then_updates_a_validated_origin() {
+        let mut config = ConfigFile::default();
+        config
+            .upsert_profile("prod", "https://first.signoz.example.com/")
+            .unwrap();
+        assert_eq!(
+            config.profiles["prod"].url,
+            "https://first.signoz.example.com"
+        );
+
+        config
+            .upsert_profile("prod", "https://second.signoz.example.com")
+            .unwrap();
+        assert_eq!(
+            config.profiles["prod"].url,
+            "https://second.signoz.example.com"
         );
     }
 

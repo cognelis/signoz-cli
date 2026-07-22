@@ -1,7 +1,21 @@
 use reqwest::Method;
-use signoz_client::{Credentials, Operation, SigNozClient, SigNozOrigin};
+use signoz_client::{Credentials, FieldQuery, Operation, SigNozClient, SigNozOrigin};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn field_query() -> FieldQuery<'static> {
+    FieldQuery {
+        source: None,
+        limit: 100,
+        start_ms: 1,
+        end_ms: 2,
+        context: None,
+        data_type: None,
+        metric_name: None,
+        metric_namespace: None,
+        search: None,
+    }
+}
 
 #[tokio::test]
 async fn every_read_operation_uses_its_official_route() {
@@ -22,12 +36,12 @@ async fn every_read_operation_uses_its_official_route() {
             "/api/v2/metrics",
         ),
         (
-            Operation::field_keys("logs"),
+            Operation::field_keys("logs", field_query()),
             Method::GET,
             "/api/v1/fields/keys",
         ),
         (
-            Operation::field_values("logs", "service.name"),
+            Operation::field_values("logs", "service.name", None, field_query()),
             Method::GET,
             "/api/v1/fields/values",
         ),
@@ -59,14 +73,14 @@ async fn every_read_operation_uses_its_official_route() {
             "/api/v2/rules/rule/history/timeline",
         ),
         (
-            Operation::dashboards_list(),
+            Operation::dashboards_list(None, "updated_at", "desc", 100, 0),
             Method::GET,
-            "/api/v1/dashboards",
+            "/api/v2/dashboards",
         ),
         (
             Operation::dashboard_get("dash"),
             Method::GET,
-            "/api/v1/dashboards/dash",
+            "/api/v2/dashboards/dash",
         ),
         (
             Operation::services_list(1, 2),
@@ -205,7 +219,7 @@ fn cardinality_and_field_values_use_the_official_query_names() {
         Some("run.googleapis.com/request")
     );
     assert_eq!(cardinality.query_value("start"), Some("1"));
-    let values = Operation::field_values("logs", "service.name");
+    let values = Operation::field_values("logs", "service.name", None, field_query());
     assert_eq!(values.query_value("name"), Some("service.name"));
     assert_eq!(values.query_value("key"), None);
     let views = Operation::views_list("traces");

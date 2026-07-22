@@ -254,6 +254,64 @@ fn client_error_codes_have_stable_process_exit_codes() {
     );
 }
 
+#[test]
+fn config_path_does_not_require_a_readable_configuration() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("broken.toml");
+    std::fs::write(&config, "not valid = [").unwrap();
+
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--output", "json", "config", "path"])
+        .env("SIGNOZ_CONFIG", &config)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["command"], "config.path");
+    assert_eq!(envelope["data"]["path"], config.display().to_string());
+}
+
+#[test]
+fn init_refuses_non_interactive_input_without_writing_partial_state() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+    let config = home.path().join("config.toml");
+
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--output", "json", "init"])
+        .env("HOME", home.path())
+        .env("CLAUDE_CONFIG_DIR", claude_config.path())
+        .env("SIGNOZ_CONFIG", &config)
+        .env_remove("SIGNOZ_URL")
+        .env_remove("SIGNOZ_API_KEY")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(envelope["error"]["code"], "validation");
+    assert!(
+        envelope["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("interactive terminal")
+    );
+    assert!(
+        envelope["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("--api-key-stdin")
+    );
+    assert!(!config.exists());
+    assert!(!home.path().join(".agents/skills/signoz-cli").exists());
+    assert!(!claude_config.path().join("skills/signoz-cli").exists());
+}
+
 #[tokio::test]
 async fn doctor_reports_ordered_healthy_checks_without_exposing_identity_secrets() {
     let server = MockServer::start().await;
@@ -600,16 +658,86 @@ async fn metrics_list_reports_upstream_limit_as_potentially_incomplete() {
 }
 
 #[tokio::test]
-async fn unbounded_resource_lists_apply_exact_client_side_pagination() {
+async fn field_values_expose_public_discovery_filters_and_completeness() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/dashboards"))
+        .and(path("/api/v1/fields/values"))
+        .and(query_param("signal", "metrics"))
+        .and(query_param("name", "service.name"))
+        .and(query_param("source", "meter"))
+        .and(query_param("limit", "25"))
+        .and(query_param("fieldContext", "resource"))
+        .and(query_param("fieldDataType", "string"))
+        .and(query_param("metricName", "requests"))
+        .and(query_param("metricNamespace", "production"))
+        .and(query_param("searchText", "checkout"))
+        .and(query_param("existingQuery", "env = 'prod'"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": [
-                {"id": "first"},
+            "data": {"complete": false, "values": []}
+        })))
+        .mount(&server)
+        .await;
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
+    command
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "fields",
+            "values",
+            "--signal",
+            "metrics",
+            "service.name",
+            "--source",
+            "meter",
+            "--limit",
+            "25",
+            "--context",
+            "resource",
+            "--type",
+            "string",
+            "--metric-name",
+            "requests",
+            "--metric-namespace",
+            "production",
+            "--search",
+            "checkout",
+            "--existing-query",
+            "env = 'prod'",
+            "--since",
+            "1h",
+        ])
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"fields.values\""))
+        .stdout(predicate::str::contains("\"hasMore\": true"))
+        .stdout(predicate::str::contains(
+            "field discovery reached the server limit",
+        ));
+}
+
+#[tokio::test]
+async fn public_dashboard_list_uses_server_side_search_sort_and_pagination() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/dashboards"))
+        .and(query_param("query", "name = 'prod'"))
+        .and(query_param("sort", "name"))
+        .and(query_param("order", "asc"))
+        .and(query_param("limit", "2"))
+        .and(query_param("offset", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+              "dashboards": [
                 {"id": "second"},
                 {"id": "third"}
-            ]
+              ],
+              "total": 3,
+              "tags": [],
+              "reservedKeywords": []
+            }
         })))
         .mount(&server)
         .await;
@@ -626,6 +754,12 @@ async fn unbounded_resource_lists_apply_exact_client_side_pagination() {
             "2",
             "--offset",
             "1",
+            "--query",
+            "name = 'prod'",
+            "--sort",
+            "name",
+            "--order",
+            "asc",
         ])
         .env("SIGNOZ_API_KEY", "test-secret")
         .assert()
@@ -640,10 +774,15 @@ async fn unbounded_resource_lists_apply_exact_client_side_pagination() {
 async fn empty_and_incompatible_list_shapes_are_distinguished() {
     let empty_server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/dashboards"))
+        .and(path("/api/v2/dashboards"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "status": "success",
-            "data": null
+            "data": {
+                "dashboards": [],
+                "total": 0,
+                "tags": [],
+                "reservedKeywords": []
+            }
         })))
         .mount(&empty_server)
         .await;
@@ -763,7 +902,11 @@ async fn metrics_query_resolves_aggregation_from_catalog_metadata() {
                 "temporality": "cumulative",
                 "timeAggregation": "rate",
                 "spaceAggregation": "sum"
-            }]}}]}
+            }],
+            "filter": {"expression": "service.name = 'api'"},
+            "groupBy": [{"name": "service.name"}],
+            "stepInterval": 300
+            }}]}
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "data": {"data": {"results": [{"rows": []}]}}
@@ -782,6 +925,12 @@ async fn metrics_query_resolves_aggregation_from_catalog_metadata() {
             "http.requests",
             "--since",
             "1h",
+            "--filter",
+            "service.name = 'api'",
+            "--group-by",
+            "service.name",
+            "--step",
+            "300",
         ])
         .env("SIGNOZ_API_KEY", "test-secret")
         .assert()
@@ -1222,6 +1371,52 @@ async fn aggregate_commands_require_a_field_and_never_advertise_offset_paginatio
         .stderr(predicate::str::contains("unexpected argument '--offset'"));
 }
 
+#[tokio::test]
+async fn aggregate_commands_support_grouped_time_series() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v5/query_range"))
+        .and(body_partial_json(json!({
+            "requestType": "time_series",
+            "compositeQuery": {"queries": [{"spec": {
+                "signal": "traces",
+                "limit": 25,
+                "stepInterval": 300,
+                "groupBy": [{"name": "service.name"}],
+                "aggregations": [{"expression": "count()"}]
+            }}]}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {"data": {"results": [{"rows": []}]}}
+        })))
+        .mount(&server)
+        .await;
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
+    command
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "traces",
+            "aggregate",
+            "--since",
+            "1h",
+            "--group-by",
+            "service.name",
+            "--step",
+            "300",
+            "--limit",
+            "25",
+        ])
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"command\": \"traces.aggregate\"",
+        ));
+}
+
 #[test]
 fn invalid_time_is_a_validation_error_before_network_access() {
     let mut command = Command::cargo_bin("signoz-cli").unwrap();
@@ -1297,6 +1492,47 @@ async fn raw_query_inserts_an_omitted_v5_schema_version() {
 }
 
 #[tokio::test]
+async fn query_preview_uses_the_public_lightweight_validation_endpoint_by_default() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v5/query_range/preview"))
+        .and(query_param("verbose", "false"))
+        .and(body_partial_json(json!({"schemaVersion": "v1"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {"queries": [{"valid": true}]}
+        })))
+        .mount(&server)
+        .await;
+    let request = json!({
+        "start": 1,
+        "end": 2,
+        "requestType": "raw",
+        "compositeQuery": {"queries": [{
+            "type": "builder_query",
+            "spec": {"name": "A", "signal": "logs"}
+        }]}
+    });
+
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
+    command
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "query",
+            "preview",
+            "--file",
+            "-",
+        ])
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .write_stdin(request.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"command\": \"query.preview\""));
+}
+
+#[tokio::test]
 async fn unsupported_rule_list_reports_the_minimum_version() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1317,146 +1553,15 @@ async fn unsupported_rule_list_reports_the_minimum_version() {
         .stderr(predicate::str::contains("requires SigNoz 0.120 or newer"));
 }
 
-#[tokio::test]
-async fn remaining_remote_subcommands_dispatch_to_their_read_routes() {
-    struct Case {
-        args: &'static [&'static str],
-        method: &'static str,
-        path: &'static str,
-        command: &'static str,
-        response: serde_json::Value,
-    }
+struct RemoteCase {
+    args: &'static [&'static str],
+    method: &'static str,
+    path: &'static str,
+    command: &'static str,
+    response: serde_json::Value,
+}
 
-    let query_response = || json!({"data": {"data": {"results": [{"rows": []}]}}});
-    let cases = [
-        Case {
-            args: &["metrics", "top", "--since", "1h"],
-            method: "POST",
-            path: "/api/v2/metrics/treemap",
-            command: "metrics.top",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["metrics", "cardinality", "requests", "--since", "1h"],
-            method: "GET",
-            path: "/api/v2/metrics/attributes",
-            command: "metrics.cardinality",
-            response: json!({"data": {}}),
-        },
-        Case {
-            args: &["fields", "keys", "--signal", "logs"],
-            method: "GET",
-            path: "/api/v1/fields/keys",
-            command: "fields.keys",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["fields", "values", "--signal", "logs", "service.name"],
-            method: "GET",
-            path: "/api/v1/fields/values",
-            command: "fields.values",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["logs", "aggregate", "--since", "1h"],
-            method: "POST",
-            path: "/api/v5/query_range",
-            command: "logs.aggregate",
-            response: query_response(),
-        },
-        Case {
-            args: &["traces", "search", "--since", "1h"],
-            method: "POST",
-            path: "/api/v5/query_range",
-            command: "traces.search",
-            response: query_response(),
-        },
-        Case {
-            args: &["traces", "aggregate", "--since", "1h"],
-            method: "POST",
-            path: "/api/v5/query_range",
-            command: "traces.aggregate",
-            response: query_response(),
-        },
-        Case {
-            args: &["traces", "get", "trace-id", "--since", "1h"],
-            method: "POST",
-            path: "/api/v5/query_range",
-            command: "traces.get",
-            response: query_response(),
-        },
-        Case {
-            args: &["services", "list", "--since", "1h"],
-            method: "POST",
-            path: "/api/v1/services",
-            command: "services.list",
-            response: json!([]),
-        },
-        Case {
-            args: &["services", "operations", "checkout", "--since", "1h"],
-            method: "POST",
-            path: "/api/v1/service/top_operations",
-            command: "services.operations",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["alerts", "list"],
-            method: "GET",
-            path: "/api/v1/alerts",
-            command: "alerts.list",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["rules", "get", "rule-id"],
-            method: "GET",
-            path: "/api/v2/rules/rule-id",
-            command: "rules.get",
-            response: json!({"data": {}}),
-        },
-        Case {
-            args: &["rules", "history", "rule-id", "--since", "1h"],
-            method: "GET",
-            path: "/api/v2/rules/rule-id/history/timeline",
-            command: "rules.history",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["dashboards", "get", "dashboard-id"],
-            method: "GET",
-            path: "/api/v1/dashboards/dashboard-id",
-            command: "dashboards.get",
-            response: json!({"data": {}}),
-        },
-        Case {
-            args: &["views", "list", "--source-page", "logs"],
-            method: "GET",
-            path: "/api/v1/explorer/views",
-            command: "views.list",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["views", "get", "view-id"],
-            method: "GET",
-            path: "/api/v1/explorer/views/view-id",
-            command: "views.get",
-            response: json!({"data": {}}),
-        },
-        Case {
-            args: &["channels", "list"],
-            method: "GET",
-            path: "/api/v1/channels",
-            command: "channels.list",
-            response: json!({"data": []}),
-        },
-        Case {
-            args: &["channels", "get", "channel-id"],
-            method: "GET",
-            path: "/api/v1/channels/channel-id",
-            command: "channels.get",
-            response: json!({"data": {}}),
-        },
-    ];
-
+async fn assert_remote_cases(cases: Vec<RemoteCase>) {
     for case in cases {
         let server = MockServer::start().await;
         Mock::given(method(case.method))
@@ -1483,6 +1588,234 @@ async fn remaining_remote_subcommands_dispatch_to_their_read_routes() {
                 case.command
             )));
     }
+}
+
+#[tokio::test]
+async fn remaining_remote_subcommands_dispatch_to_their_read_routes() {
+    let query_response = || json!({"data": {"data": {"results": [{"rows": []}]}}});
+    let cases = [
+        RemoteCase {
+            args: &["metrics", "top", "--since", "1h"],
+            method: "POST",
+            path: "/api/v2/metrics/treemap",
+            command: "metrics.top",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["metrics", "cardinality", "requests", "--since", "1h"],
+            method: "GET",
+            path: "/api/v2/metrics/attributes",
+            command: "metrics.cardinality",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["fields", "keys", "--signal", "logs"],
+            method: "GET",
+            path: "/api/v1/fields/keys",
+            command: "fields.keys",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["fields", "values", "--signal", "logs", "service.name"],
+            method: "GET",
+            path: "/api/v1/fields/values",
+            command: "fields.values",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["logs", "aggregate", "--since", "1h"],
+            method: "POST",
+            path: "/api/v5/query_range",
+            command: "logs.aggregate",
+            response: query_response(),
+        },
+        RemoteCase {
+            args: &["traces", "search", "--since", "1h"],
+            method: "POST",
+            path: "/api/v5/query_range",
+            command: "traces.search",
+            response: query_response(),
+        },
+        RemoteCase {
+            args: &["traces", "aggregate", "--since", "1h"],
+            method: "POST",
+            path: "/api/v5/query_range",
+            command: "traces.aggregate",
+            response: query_response(),
+        },
+        RemoteCase {
+            args: &["traces", "get", "trace-id", "--since", "1h"],
+            method: "POST",
+            path: "/api/v5/query_range",
+            command: "traces.get",
+            response: query_response(),
+        },
+        RemoteCase {
+            args: &["services", "list", "--since", "1h"],
+            method: "POST",
+            path: "/api/v1/services",
+            command: "services.list",
+            response: json!([]),
+        },
+        RemoteCase {
+            args: &["services", "operations", "checkout", "--since", "1h"],
+            method: "POST",
+            path: "/api/v1/service/top_operations",
+            command: "services.operations",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["alerts", "list"],
+            method: "GET",
+            path: "/api/v1/alerts",
+            command: "alerts.list",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["rules", "get", "rule-id"],
+            method: "GET",
+            path: "/api/v2/rules/rule-id",
+            command: "rules.get",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["rules", "history", "rule-id", "--since", "1h"],
+            method: "GET",
+            path: "/api/v2/rules/rule-id/history/timeline",
+            command: "rules.history",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["dashboards", "get", "dashboard-id"],
+            method: "GET",
+            path: "/api/v2/dashboards/dashboard-id",
+            command: "dashboards.get",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["views", "list", "--source-page", "logs"],
+            method: "GET",
+            path: "/api/v1/explorer/views",
+            command: "views.list",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["views", "get", "view-id"],
+            method: "GET",
+            path: "/api/v1/explorer/views/view-id",
+            command: "views.get",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["channels", "list"],
+            method: "GET",
+            path: "/api/v1/channels",
+            command: "channels.list",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["channels", "get", "channel-id"],
+            method: "GET",
+            path: "/api/v1/channels/channel-id",
+            command: "channels.get",
+            response: json!({"data": {}}),
+        },
+    ];
+
+    assert_remote_cases(cases.into()).await;
+}
+
+#[tokio::test]
+async fn extended_observability_subcommands_dispatch_to_their_routes() {
+    let query_response = || json!({"data": {"data": {"results": [{"rows": []}]}}});
+    let cases = vec![
+        RemoteCase {
+            args: &["metrics", "metadata", "requests"],
+            method: "GET",
+            path: "/api/v2/metrics/metadata",
+            command: "metrics.metadata",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["metrics", "highlights", "requests"],
+            method: "GET",
+            path: "/api/v2/metrics/highlights",
+            command: "metrics.highlights",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["metrics", "inspect", "requests", "--since", "15m"],
+            method: "POST",
+            path: "/api/v2/metrics/inspect",
+            command: "metrics.inspect",
+            response: json!({"data": {"series": []}}),
+        },
+        RemoteCase {
+            args: &["services", "dependencies", "--since", "1h"],
+            method: "POST",
+            path: "/api/v1/dependency_graph",
+            command: "services.dependencies",
+            response: json!([]),
+        },
+        RemoteCase {
+            args: &["exceptions", "list", "--since", "1h"],
+            method: "POST",
+            path: "/api/v1/listErrors",
+            command: "exceptions.list",
+            response: json!([]),
+        },
+        RemoteCase {
+            args: &["exceptions", "group", "group-id", "--timestamp", "123"],
+            method: "GET",
+            path: "/api/v1/errorFromGroupID",
+            command: "exceptions.group",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["infrastructure", "check", "hosts"],
+            method: "GET",
+            path: "/api/v2/infra_monitoring/checks",
+            command: "infrastructure.check",
+            response: json!({"data": {"ready": true}}),
+        },
+        RemoteCase {
+            args: &["infrastructure", "list", "hosts", "--since", "1h"],
+            method: "POST",
+            path: "/api/v2/infra_monitoring/hosts",
+            command: "infrastructure.list",
+            response: json!({"data": {"records": [], "total": 0}}),
+        },
+        RemoteCase {
+            args: &["meters", "summary", "--since", "7d"],
+            method: "POST",
+            path: "/api/v5/query_range",
+            command: "meters.summary",
+            response: query_response(),
+        },
+        RemoteCase {
+            args: &["rules", "history-stats", "rule-id", "--since", "1h"],
+            method: "GET",
+            path: "/api/v2/rules/rule-id/history/stats",
+            command: "rules.history-stats",
+            response: json!({"data": {}}),
+        },
+        RemoteCase {
+            args: &["rules", "history-status", "rule-id", "--since", "1h"],
+            method: "GET",
+            path: "/api/v2/rules/rule-id/history/overall_status",
+            command: "rules.history-status",
+            response: json!({"data": []}),
+        },
+        RemoteCase {
+            args: &["rules", "history-contributors", "rule-id", "--since", "1h"],
+            method: "GET",
+            path: "/api/v2/rules/rule-id/history/top_contributors",
+            command: "rules.history-contributors",
+            response: json!({"data": []}),
+        },
+    ];
+
+    assert_remote_cases(cases).await;
 }
 
 #[test]

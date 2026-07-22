@@ -52,7 +52,16 @@ impl ClientError {
             _ => ErrorCode::Upstream,
         };
         let retryable = matches!(status, 429 | 502 | 503 | 504);
-        let hint = minimum_version.map(|version| format!("requires SigNoz {version} or newer"));
+        let hint = (status == 404)
+            .then_some(minimum_version)
+            .flatten()
+            .map(|requirement| {
+                if requirement.starts_with("with ") {
+                    format!("this command requires a SigNoz server {requirement}")
+                } else {
+                    format!("requires SigNoz {requirement} or newer")
+                }
+            });
         let message = if body.trim().is_empty() {
             format!("SigNoz returned HTTP {status}")
         } else {
@@ -101,5 +110,9 @@ mod tests {
         );
         assert!(ClientError::from_status(503, "down", None).retryable());
         assert!(!ClientError::from_status(404, "missing", None).retryable());
+        assert_eq!(
+            ClientError::from_status(404, "missing", Some("with the compatibility API")).hint(),
+            Some("this command requires a SigNoz server with the compatibility API")
+        );
     }
 }

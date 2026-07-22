@@ -1,4 +1,4 @@
-use clap::CommandFactory;
+use clap::{CommandFactory, Parser};
 use signoz_cli::args::Cli;
 
 #[test]
@@ -12,7 +12,9 @@ fn command_tree_is_valid_and_complete() {
         .collect();
     for expected in [
         "version",
+        "init",
         "doctor",
+        "config",
         "skills",
         "auth",
         "profile",
@@ -21,6 +23,9 @@ fn command_tree_is_valid_and_complete() {
         "logs",
         "traces",
         "services",
+        "exceptions",
+        "infrastructure",
+        "meters",
         "alerts",
         "rules",
         "dashboards",
@@ -30,4 +35,80 @@ fn command_tree_is_valid_and_complete() {
     ] {
         assert!(names.contains(&expected), "missing command {expected}");
     }
+
+    assert!(Cli::try_parse_from(["signoz-cli", "init"]).is_ok());
+    assert!(Cli::try_parse_from(["signoz-cli", "auth", "login"]).is_ok());
+    assert!(
+        Cli::try_parse_from(["signoz-cli", "exceptions", "list", "--service", "checkout",]).is_ok()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "signoz-cli",
+            "infrastructure",
+            "list",
+            "hosts",
+            "--status",
+            "active",
+        ])
+        .is_ok()
+    );
+    assert!(Cli::try_parse_from(["signoz-cli", "meters", "summary"]).is_ok());
+    assert!(
+        Cli::try_parse_from([
+            "signoz-cli",
+            "metrics",
+            "query",
+            "requests",
+            "--filter",
+            "service.name = 'api'",
+            "--group-by",
+            "service.name",
+            "--step",
+            "300",
+        ])
+        .is_ok()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "signoz-cli",
+            "fields",
+            "values",
+            "--signal",
+            "logs",
+            "service.name",
+            "--context",
+            "resource",
+            "--type",
+            "string",
+            "--search",
+            "checkout",
+        ])
+        .is_ok()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "signoz-cli",
+            "logs",
+            "aggregate",
+            "--group-by",
+            "service.name",
+            "--step",
+            "60",
+        ])
+        .is_ok()
+    );
+    assert!(
+        Cli::try_parse_from(["signoz-cli", "query", "preview", "--file", "query.json"]).is_ok()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "signoz-cli",
+            "profile",
+            "update",
+            "production",
+            "--url",
+            "https://signoz.example.com",
+        ])
+        .is_ok()
+    );
 }

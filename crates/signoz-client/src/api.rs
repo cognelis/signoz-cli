@@ -14,6 +14,19 @@ pub struct Operation {
     minimum_version: Option<&'static str>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct FieldQuery<'a> {
+    pub source: Option<&'a str>,
+    pub limit: u32,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub context: Option<&'a str>,
+    pub data_type: Option<&'a str>,
+    pub metric_name: Option<&'a str>,
+    pub metric_namespace: Option<&'a str>,
+    pub search: Option<&'a str>,
+}
+
 impl Operation {
     fn get(path: impl Into<String>) -> Self {
         Self {
@@ -90,14 +103,22 @@ impl Operation {
             .query("searchText", metric)
     }
 
-    pub fn field_keys(signal: &str) -> Self {
-        Self::get("/api/v1/fields/keys").query("signal", signal)
+    pub fn field_keys(signal: &str, query: FieldQuery<'_>) -> Self {
+        field_operation("/api/v1/fields/keys", signal, query)
     }
 
-    pub fn field_values(signal: &str, key: &str) -> Self {
-        Self::get("/api/v1/fields/values")
-            .query("signal", signal)
-            .query("name", key)
+    pub fn field_values(
+        signal: &str,
+        key: &str,
+        existing_query: Option<&str>,
+        query: FieldQuery<'_>,
+    ) -> Self {
+        let mut operation =
+            field_operation("/api/v1/fields/values", signal, query).query("name", key);
+        if let Some(existing_query) = non_empty(existing_query) {
+            operation = operation.query("existingQuery", existing_query);
+        }
+        operation
     }
 
     pub fn metric_treemap(start_ms: i64, end_ms: i64, limit: u32) -> Self {
@@ -119,6 +140,26 @@ impl Operation {
             .query("metricName", metric)
             .query("start", start_ms)
             .query("end", end_ms)
+    }
+
+    pub fn metric_metadata(metric: &str) -> Self {
+        Self::get("/api/v2/metrics/metadata").query("metricName", metric)
+    }
+
+    pub fn metric_highlights(metric: &str) -> Self {
+        Self::get("/api/v2/metrics/highlights").query("metricName", metric)
+    }
+
+    pub fn metric_inspect(metric: &str, start_ms: i64, end_ms: i64, filter: Option<&str>) -> Self {
+        let mut body = serde_json::json!({
+            "metricName": metric,
+            "start": start_ms,
+            "end": end_ms,
+        });
+        if let Some(filter) = filter.filter(|value| !value.trim().is_empty()) {
+            body["filter"] = serde_json::json!({"expression": filter});
+        }
+        Self::post("/api/v2/metrics/inspect", body)
     }
 
     pub fn metric_dashboards(metric: &str) -> Self {
@@ -174,12 +215,45 @@ impl Operation {
         operation
     }
 
-    pub fn dashboards_list() -> Self {
-        Self::get("/api/v1/dashboards")
+    pub fn rule_history_stats(id: &str, start_ms: i64, end_ms: i64) -> Self {
+        Self::rule_history_range(id, "stats", start_ms, end_ms)
+    }
+
+    pub fn rule_history_overall_status(id: &str, start_ms: i64, end_ms: i64) -> Self {
+        Self::rule_history_range(id, "overall_status", start_ms, end_ms)
+    }
+
+    pub fn rule_history_top_contributors(id: &str, start_ms: i64, end_ms: i64) -> Self {
+        Self::rule_history_range(id, "top_contributors", start_ms, end_ms)
+    }
+
+    fn rule_history_range(id: &str, suffix: &str, start_ms: i64, end_ms: i64) -> Self {
+        Self::get(format!("/api/v2/rules/{}/history/{suffix}", segment(id)))
+            .query("start", start_ms)
+            .query("end", end_ms)
+            .minimum_version("0.118")
+    }
+
+    pub fn dashboards_list(
+        query: Option<&str>,
+        sort: &str,
+        order: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Self {
+        let mut operation = Self::get("/api/v2/dashboards")
+            .query("sort", sort)
+            .query("order", order)
+            .query("limit", limit.max(1))
+            .query("offset", offset);
+        if let Some(query) = query.filter(|value| !value.trim().is_empty()) {
+            operation = operation.query("query", query);
+        }
+        operation
     }
 
     pub fn dashboard_get(id: &str) -> Self {
-        Self::get(format!("/api/v1/dashboards/{}", segment(id)))
+        Self::get(format!("/api/v2/dashboards/{}", segment(id)))
     }
 
     pub fn services_list(start_ms: i64, end_ms: i64) -> Self {
@@ -190,6 +264,7 @@ impl Operation {
                 "end": nanos(end_ms)
             }),
         )
+        .minimum_version("with the first-party service compatibility API")
     }
 
     pub fn service_operations(service: &str, start_ms: i64, end_ms: i64) -> Self {
@@ -202,6 +277,93 @@ impl Operation {
                 "tags": []
             }),
         )
+        .minimum_version("with the first-party service compatibility API")
+    }
+
+    pub fn service_dependencies(start_ms: i64, end_ms: i64) -> Self {
+        Self::post(
+            "/api/v1/dependency_graph",
+            serde_json::json!({
+                "start": nanos(start_ms),
+                "end": nanos(end_ms),
+                "tags": []
+            }),
+        )
+        .minimum_version("with the first-party service-map compatibility API")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn exceptions_list(
+        start_ms: i64,
+        end_ms: i64,
+        order: &str,
+        order_by: &str,
+        limit: u32,
+        offset: u32,
+        exception_type: Option<&str>,
+        service: Option<&str>,
+    ) -> Self {
+        let mut body = serde_json::json!({
+            "start": nanos(start_ms),
+            "end": nanos(end_ms),
+            "order": order,
+            "orderParam": order_by,
+            "limit": limit.max(1),
+            "offset": offset,
+            "tags": []
+        });
+        insert_optional_string(&mut body, "exceptionType", exception_type);
+        insert_optional_string(&mut body, "serviceName", service);
+        Self::post("/api/v1/listErrors", body)
+            .minimum_version("with the first-party exceptions compatibility API")
+    }
+
+    pub fn exceptions_count(
+        start_ms: i64,
+        end_ms: i64,
+        exception_type: Option<&str>,
+        service: Option<&str>,
+    ) -> Self {
+        let mut body = serde_json::json!({
+            "start": nanos(start_ms),
+            "end": nanos(end_ms),
+            "tags": []
+        });
+        insert_optional_string(&mut body, "exceptionType", exception_type);
+        insert_optional_string(&mut body, "serviceName", service);
+        Self::post("/api/v1/countErrors", body)
+            .minimum_version("with the first-party exceptions compatibility API")
+    }
+
+    pub fn exception_group(group_id: &str, timestamp: &str) -> Self {
+        Self::get("/api/v1/errorFromGroupID")
+            .query("groupID", group_id)
+            .query("timestamp", timestamp)
+            .minimum_version("with the first-party exceptions compatibility API")
+    }
+
+    pub fn exception_get(group_id: &str, error_id: &str, timestamp: &str) -> Self {
+        Self::get("/api/v1/errorFromErrorID")
+            .query("groupID", group_id)
+            .query("errorID", error_id)
+            .query("timestamp", timestamp)
+            .minimum_version("with the first-party exceptions compatibility API")
+    }
+
+    pub fn exception_navigation(group_id: &str, error_id: &str, timestamp: &str) -> Self {
+        Self::get("/api/v1/nextPrevErrorIDs")
+            .query("groupID", group_id)
+            .query("errorID", error_id)
+            .query("timestamp", timestamp)
+            .minimum_version("with the first-party exceptions compatibility API")
+    }
+
+    pub fn infrastructure_check(resource: &str) -> Self {
+        Self::get("/api/v2/infra_monitoring/checks").query("type", resource)
+    }
+
+    pub fn infrastructure_list(resource: &str, body: Value) -> Self {
+        Self::post(format!("/api/v2/infra_monitoring/{resource}"), body)
     }
 
     pub fn views_list(source_page: &str) -> Self {
@@ -222,6 +384,10 @@ impl Operation {
 
     pub fn query_raw(body: Value) -> Self {
         Self::post("/api/v5/query_range", body)
+    }
+
+    pub fn query_preview(body: Value, explain: bool) -> Self {
+        Self::post("/api/v5/query_range/preview", body).query("verbose", explain)
     }
 }
 
@@ -280,12 +446,103 @@ fn nanos(milliseconds: i64) -> String {
     milliseconds.saturating_mul(1_000_000).to_string()
 }
 
+fn insert_optional_string(body: &mut Value, key: &str, value: Option<&str>) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        body[key] = Value::String(value.to_owned());
+    }
+}
+
+fn field_operation(path: &str, signal: &str, query: FieldQuery<'_>) -> Operation {
+    let mut operation = Operation::get(path)
+        .query("signal", signal)
+        .query("limit", query.limit.max(1))
+        .query("startUnixMilli", query.start_ms)
+        .query("endUnixMilli", query.end_ms);
+    for (key, value) in [
+        ("source", query.source),
+        ("fieldContext", query.context),
+        ("fieldDataType", query.data_type),
+        ("metricName", query.metric_name),
+        ("metricNamespace", query.metric_namespace),
+        ("searchText", query.search),
+    ] {
+        if let Some(value) = non_empty(value) {
+            operation = operation.query(key, value);
+        }
+    }
+    operation
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.trim().is_empty())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Operation;
+    use super::{FieldQuery, Operation};
 
     #[test]
     fn identifiers_are_encoded_as_single_path_segments() {
         assert_eq!(Operation::rule_get("a/b").path(), "/api/v2/rules/a%2Fb");
+    }
+
+    #[test]
+    fn public_dashboard_reads_use_v2_and_preserve_list_controls() {
+        let list = Operation::dashboards_list(Some("name = 'prod'"), "name", "asc", 25, 50);
+        assert_eq!(list.path(), "/api/v2/dashboards");
+        assert_eq!(list.query_value("query"), Some("name = 'prod'"));
+        assert_eq!(list.query_value("sort"), Some("name"));
+        assert_eq!(list.query_value("order"), Some("asc"));
+        assert_eq!(list.query_value("limit"), Some("25"));
+        assert_eq!(list.query_value("offset"), Some("50"));
+        assert_eq!(
+            Operation::dashboard_get("a/b").path(),
+            "/api/v2/dashboards/a%2Fb"
+        );
+    }
+
+    #[test]
+    fn compatibility_and_public_domain_routes_are_explicit() {
+        assert_eq!(
+            Operation::service_dependencies(1, 2).path(),
+            "/api/v1/dependency_graph"
+        );
+        assert_eq!(
+            Operation::exception_group("group", "123").path(),
+            "/api/v1/errorFromGroupID"
+        );
+        assert_eq!(
+            Operation::infrastructure_check("hosts").path(),
+            "/api/v2/infra_monitoring/checks"
+        );
+        assert_eq!(
+            Operation::query_preview(serde_json::json!({}), false).path(),
+            "/api/v5/query_range/preview"
+        );
+    }
+
+    #[test]
+    fn field_discovery_preserves_public_filters() {
+        let query = FieldQuery {
+            source: Some("meter"),
+            limit: 25,
+            start_ms: 1,
+            end_ms: 2,
+            context: Some("resource"),
+            data_type: Some("string"),
+            metric_name: Some("requests"),
+            metric_namespace: Some("prod"),
+            search: Some("service"),
+        };
+        let values =
+            Operation::field_values("metrics", "service.name", Some("env = 'prod'"), query);
+        assert_eq!(values.query_value("limit"), Some("25"));
+        assert_eq!(values.query_value("source"), Some("meter"));
+        assert_eq!(values.query_value("fieldContext"), Some("resource"));
+        assert_eq!(values.query_value("fieldDataType"), Some("string"));
+        assert_eq!(values.query_value("metricName"), Some("requests"));
+        assert_eq!(values.query_value("metricNamespace"), Some("prod"));
+        assert_eq!(values.query_value("searchText"), Some("service"));
+        assert_eq!(values.query_value("existingQuery"), Some("env = 'prod'"));
     }
 }

@@ -18,6 +18,14 @@ The binary is named `signoz-cli`.
 
 ## Authenticate
 
+For a workstation, start the guided setup. It creates or repairs a profile, masks the API key while typing, verifies the connection before saving, stores the key in the operating-system credential store, activates the profile, and installs the bundled Skill for Codex and Claude Code by default.
+
+```sh
+signoz-cli init
+```
+
+The setup is deliberately terminal-only and never starts implicitly. If input or output is redirected it exits without changing configuration and prints the equivalent non-interactive commands.
+
 For CI and short-lived shells, use environment variables. Keep the API key in the CI provider's secret store and disable shell tracing.
 
 ```sh
@@ -27,7 +35,7 @@ export SIGNOZ_API_KEY="...from a secret store..."
 signoz-cli doctor --output json
 ```
 
-For workstation use, profiles store only the instance URL in the operating-system config directory. API keys are stored in the operating-system keyring.
+For scripts that intentionally persist a profile, profiles store only the instance URL in the operating-system config directory. API keys are verified before they are stored in the operating-system keyring.
 
 ```sh
 signoz-cli profile add production --url https://your-signoz.example.com
@@ -36,7 +44,7 @@ printf '%s' "$SIGNOZ_API_KEY" | signoz-cli auth login --api-key-stdin
 signoz-cli doctor --output json
 ```
 
-There is intentionally no `--api-key` flag, so the secret does not enter shell history or process listings.
+Running `signoz-cli auth login` without `--api-key-stdin` opens a masked prompt. Use `--no-verify` only for an intentional offline setup; the JSON result records a warning. There is intentionally no `--api-key` flag, so the secret does not enter shell history or process listings. `signoz-cli config show` never includes credentials, and `signoz-cli config path` remains usable even if the config file is malformed.
 
 ## Diagnose a connection
 
@@ -58,7 +66,8 @@ signoz-cli --output json metrics list
 
 # Query a metric for the last hour
 signoz-cli --output json metrics query http.server.duration \
-  --since 1h
+  --since 1h --filter 'service.name = "checkout"' \
+  --group-by service.name --step 60
 
 # Search logs
 signoz-cli --output json logs search \
@@ -68,12 +77,20 @@ signoz-cli --output json logs search \
 signoz-cli --output json traces search \
   --since 30m --filter 'service.name = "checkout"'
 
-# Send a complete Query Builder v5 request
+# Group exceptions and inspect infrastructure
+signoz-cli --output json exceptions list --service checkout --since 24h
+signoz-cli --output json infra list hosts --status inactive --since 1h
+
+# Summarize all five Cost Meter ingestion metrics
+signoz-cli --output json meters summary --since 7d --group-by service.name
+
+# Validate, then run a complete Query Builder v5 request
+signoz-cli --output json query preview --file request.json
 signoz-cli --output json query run --file request.json
 printf '%s' "$QUERY_JSON" | signoz-cli --output json query run --file -
 ```
 
-Use `--since` with `ms`, `s`, `m`, `h`, or `d`, or provide both `--start` and `--end` as RFC3339 timestamps or `@<unix-ms>`. The metric query command reads the metric catalog first and derives safe time/spatial aggregation from its type, temporality, and monotonicity; `--aggregation` only overrides the spatial aggregation. Raw searches and ordinary resource lists accept `--limit` and `--offset`; the JSON `meta` reports the resolved time window and pagination state. Log/trace aggregate commands return a single ungrouped scalar, do not accept offsets, and require `--aggregate-on` for functions other than `count` and `rate`. Alert-rule history uses `--cursor`/`meta.nextCursor` instead of offsets. The time-windowed metrics catalog has a limit but no offset: narrow it with `--since`, `--search`, or `--source meter`; a full page is marked `hasMore: true` with no `nextOffset`. Run `signoz-cli --help` and `signoz-cli <group> <command> --help` for the complete command surface.
+Use `--since` with `ms`, `s`, `m`, `h`, or `d`, or provide both `--start` and `--end` as RFC3339 timestamps or `@<unix-ms>`. The metric query command reads the metric catalog first and derives safe time/spatial aggregation from its type, temporality, and monotonicity; `--aggregation` only overrides the spatial aggregation. Metrics, log aggregates, and trace aggregates support filtering and grouping; aggregate `--step` switches scalar/grouped output to a time series. Raw searches and ordinary resource lists accept `--limit` and `--offset`; the JSON `meta` reports the resolved time window and pagination state. Alert-rule history uses `--cursor`/`meta.nextCursor` instead of offsets. The time-windowed metrics and field catalogs have a limit but no offset; narrow an incomplete response with their search/context/type/source/time filters. Run `signoz-cli --help` and `signoz-cli <group> <command> --help` for the exact command surface.
 
 Successful JSON output has a stable versioned envelope:
 
@@ -95,24 +112,29 @@ Successful JSON output has a stable versioned envelope:
 
 ```text
 version
+init
 doctor
+config path|show
 skills install [--target all|codex|claude]
 auth login|check|logout
-profile add|list|show|use|remove
-metrics list|query|top|cardinality|usage
+profile add|update|list|show|use|remove
+metrics list|query|top|cardinality|usage|metadata|highlights|inspect
 fields keys|values
 logs search|aggregate
 traces search|aggregate|get
-services list|operations
+services list|operations|dependencies
+exceptions list|count|group|get|navigate
+infrastructure (infra) check|list
+meters summary|query
 alerts list
-rules list|get|history
+rules list|get|history|history-stats|history-status|history-contributors
 dashboards list|get
 views list|get
 channels list|get
-query run
+query run|preview
 ```
 
-The client retries replay-safe requests on transport failures, HTTP 429, 502, 503, and 504, for at most three attempts. Responses are capped at 64 MiB. Feature-specific 404 responses report the minimum compatible SigNoz version instead of pretending that a resource is missing.
+The client retries replay-safe requests on transport failures, HTTP 429, 502, 503, and 504, for at most three attempts. Responses are capped at 64 MiB. Feature-specific 404 responses report an unsupported server capability instead of pretending that a resource is missing. Public v2/v5 routes are used for dashboards, metrics, Query Builder, rule history, and infrastructure; services, dependency maps, exceptions, and Explorer views are explicitly maintained as first-party UI/MCP compatibility adapters because SigNoz has not published equivalent stable read contracts for those views.
 
 Exit codes are stable:
 
@@ -173,7 +195,11 @@ In Claude Code, use `/plugin marketplace add SigNoz/agent-skills` followed by `/
 - Alert history requires SigNoz 0.118 or newer.
 - Alert rules require SigNoz 0.120 or newer.
 - Metric usage requires SigNoz 0.131 or newer.
+- Metric inspect accepts at most a 30-minute window.
+- Cost Meter queries default to seven days, use the documented `meter` source, and enforce a minimum one-hour step.
+- Service, dependency, exception, and Explorer-view commands may be unavailable when an internal SigNoz compatibility endpoint changes; the CLI returns exit code 7 in that case.
 - The CLI accepts self-hosted HTTP origins but does not provide an insecure TLS bypass.
+- Reverse-proxy base paths such as `https://example.com/observability/signoz` are preserved.
 - Telemetry can contain secrets or personal data. Review logs and traces before storing them as CI artifacts.
 
-The route map and behavior were derived from the current official SigNoz MCP server and Agent Skills repositories. See the main [integration design](docs/superpowers/specs/2026-07-22-signoz-rust-cli-agent-integration-design.md) and the [`doctor` design](docs/superpowers/specs/2026-07-22-signoz-cli-doctor-design.md).
+The route map and behavior were derived from current first-party SigNoz documentation, OpenAPI, frontend code, MCP server, and Agent Skills. See the [TUI and API coverage research](docs/research/2026-07-23-tui-and-signoz-api-coverage.md), the main [integration design](docs/superpowers/specs/2026-07-22-signoz-rust-cli-agent-integration-design.md), and the [`doctor` design](docs/superpowers/specs/2026-07-22-signoz-cli-doctor-design.md).

@@ -11,6 +11,7 @@ repository = "https://gitee.com/caspian/signoz-cli"
 [workspace.dependencies]
 assert_cmd = "2"
 chrono = { version = "0.4", features = ["serde"] }
+cliclack = "0.5.5"
 clap = { version = "4.5", features = ["derive", "env"] }
 directories = "6"
 keyring = { version = "3", features = ["apple-native", "linux-native-sync-persistent", "windows-native"] }
@@ -25,4 +26,3 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 toml = "0.9"
 url = "2"
 wiremock = "0.6"
-

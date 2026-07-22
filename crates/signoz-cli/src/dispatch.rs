@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use signoz_client::{
-    ClientError, ErrorCode, Operation, SigNozClient, TimeWindow, log_aggregate, log_search,
-    metric_metadata, metric_query, resolve_metric_aggregation, trace_aggregate, trace_get,
-    trace_search,
+    ClientError, ErrorCode, FieldQuery, Operation, SigNozClient, TimeWindow, log_aggregate,
+    log_search, meter_query, metric_metadata, metric_query, resolve_metric_aggregation,
+    trace_aggregate, trace_get, trace_search,
 };
 
 use crate::args::*;
@@ -32,7 +32,7 @@ pub struct AppError {
 }
 
 impl AppError {
-    fn config(message: impl Into<String>) -> Self {
+    pub(crate) fn config(message: impl Into<String>) -> Self {
         Self {
             code: ErrorCode::Config,
             message: message.into(),
@@ -41,13 +41,18 @@ impl AppError {
         }
     }
 
-    fn validation(message: impl Into<String>) -> Self {
+    pub(crate) fn validation(message: impl Into<String>) -> Self {
         Self {
             code: ErrorCode::Validation,
             message: message.into(),
             status: None,
             hint: None,
         }
+    }
+
+    pub(crate) fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
     }
 }
 
@@ -69,6 +74,10 @@ enum Prepared {
     MetricQuery {
         name: String,
         aggregation: Option<String>,
+        filter: Option<String>,
+        group_by: Vec<String>,
+        step: u32,
+        source: Option<String>,
         window: TimeWindow,
         limit: u32,
         offset: u32,
@@ -86,6 +95,29 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     }
     if matches!(&cli.command, Command::Doctor) {
         return Ok(run_doctor(cli).await);
+    }
+    if let Command::Config {
+        command: ConfigCommand::Path,
+    } = &cli.command
+    {
+        let path = config_path()?;
+        return Ok(DispatchResult {
+            command: "config.path".into(),
+            data: json!({"path": path.to_string_lossy()}),
+            meta: Meta::default(),
+            failure_code: None,
+        });
+    }
+    if matches!(&cli.command, Command::Init) {
+        let path = config_path()?;
+        return crate::onboarding::run_init(
+            cli.profile.as_deref(),
+            cli.url.as_deref(),
+            cli.timeout,
+            &path,
+            &SystemKeyring,
+        )
+        .await;
     }
     if let Command::Skills { command } = &cli.command {
         let results = match command {
@@ -105,6 +137,24 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     let path = config_path()?;
     let mut config = ConfigFile::load(&path).map_err(AppError::config)?;
     let store = SystemKeyring;
+    if let Command::Auth {
+        command: AuthCommand::Login {
+            api_key_stdin,
+            no_verify,
+        },
+    } = &cli.command
+    {
+        return crate::onboarding::run_login(
+            cli.profile.as_deref(),
+            *api_key_stdin,
+            *no_verify,
+            cli.timeout,
+            cli.output,
+            &config,
+            &store,
+        )
+        .await;
+    }
     let prepared = prepare(
         &cli.command,
         cli.profile.as_deref(),
@@ -122,6 +172,10 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
         Prepared::MetricQuery {
             name,
             aggregation,
+            filter,
+            group_by,
+            step,
+            source,
             window,
             limit,
             offset,
@@ -130,6 +184,10 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
             Remote::MetricQuery {
                 name,
                 aggregation,
+                filter,
+                group_by,
+                step,
+                source,
                 window,
                 limit,
                 offset,
@@ -159,6 +217,10 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
         Remote::MetricQuery {
             name,
             aggregation,
+            filter,
+            group_by,
+            step,
+            source,
             window,
             limit,
             offset,
@@ -178,6 +240,10 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
                     window,
                     &name,
                     &aggregation,
+                    filter.as_deref(),
+                    &group_by,
+                    step,
+                    source.as_deref(),
                     limit,
                     offset,
                 )))
@@ -200,6 +266,8 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
         }
     ) {
         apply_limit_only_metrics_catalog_meta(&mut meta, &mut response.value)?;
+    } else if matches!(&cli.command, Command::Fields { .. }) {
+        apply_field_discovery_meta(&mut meta, &response.value);
     } else if matches!(
         &cli.command,
         Command::Rules {
@@ -359,6 +427,10 @@ enum Remote {
     MetricQuery {
         name: String,
         aggregation: Option<String>,
+        filter: Option<String>,
+        group_by: Vec<String>,
+        step: u32,
+        source: Option<String>,
         window: TimeWindow,
         limit: u32,
         offset: u32,
@@ -375,35 +447,26 @@ fn prepare(
 ) -> Result<Prepared, AppError> {
     match command {
         Command::Version => local("version", json!({"version": env!("CARGO_PKG_VERSION")})),
+        Command::Init => unreachable!("init is dispatched before command preparation"),
         Command::Doctor => unreachable!("doctor is dispatched before command preparation"),
+        Command::Config { command } => match command {
+            ConfigCommand::Path => local(
+                "config.path",
+                json!({"path": config_path.to_string_lossy()}),
+            ),
+            ConfigCommand::Show => local(
+                "config.show",
+                serde_json::to_value(config)
+                    .map_err(|error| AppError::config(error.to_string()))?,
+            ),
+        },
         Command::Skills { .. } => {
             unreachable!("skills are dispatched before command preparation")
         }
         Command::Auth { command } => match command {
             AuthCommand::Check => Ok(Prepared::Operation("auth.check", Operation::auth_me())),
-            AuthCommand::Login { api_key_stdin } => {
-                if !api_key_stdin {
-                    return Err(AppError::validation("use --api-key-stdin"));
-                }
-                let profile = selected_profile
-                    .map(str::to_owned)
-                    .or_else(|| config.current_profile.clone())
-                    .ok_or_else(|| AppError::config("select a profile before auth login"))?;
-                if !config.profiles.contains_key(&profile) {
-                    return Err(AppError::config(format!(
-                        "profile '{profile}' does not exist"
-                    )));
-                }
-                let mut key = String::new();
-                io::stdin()
-                    .read_to_string(&mut key)
-                    .map_err(|error| AppError::config(error.to_string()))?;
-                let key = key.trim();
-                if key.is_empty() {
-                    return Err(AppError::validation("API key from stdin is empty"));
-                }
-                store.set(&profile, key).map_err(AppError::config)?;
-                local("auth.login", json!({"profile": profile, "stored": true}))
+            AuthCommand::Login { .. } => {
+                unreachable!("auth login is dispatched before command preparation")
             }
             AuthCommand::Logout => {
                 let profile = selected_profile
@@ -421,6 +484,13 @@ fn prepare(
                     .map_err(AppError::validation)?;
                 config.save(config_path).map_err(AppError::config)?;
                 local("profile.add", json!({"name": name, "url": url}))
+            }
+            ProfileCommand::Update { name, url } => {
+                config
+                    .update_profile(name, url)
+                    .map_err(AppError::validation)?;
+                config.save(config_path).map_err(AppError::config)?;
+                local("profile.update", json!({"name": name, "url": url}))
             }
             ProfileCommand::List => local(
                 "profile.list",
@@ -473,15 +543,28 @@ fn prepare(
             MetricsCommand::Query {
                 name,
                 aggregation,
+                filter,
+                group_by,
+                step,
+                source,
                 time,
                 page,
-            } => Ok(Prepared::MetricQuery {
-                name: name.clone(),
-                aggregation: aggregation.clone(),
-                window: window(time, now)?,
-                limit: page.limit,
-                offset: page.offset,
-            }),
+            } => {
+                if group_by.iter().any(|value| value.trim().is_empty()) {
+                    return Err(AppError::validation("--group-by values must not be empty"));
+                }
+                Ok(Prepared::MetricQuery {
+                    name: name.clone(),
+                    aggregation: aggregation.clone(),
+                    filter: filter.clone(),
+                    group_by: group_by.clone(),
+                    step: *step,
+                    source: source.map(MetricSource::as_str).map(str::to_owned),
+                    window: window(time, now)?,
+                    limit: page.limit,
+                    offset: page.offset,
+                })
+            }
             MetricsCommand::Top { time, page } => {
                 let window = window(time, now)?;
                 operation(
@@ -497,15 +580,55 @@ fn prepare(
                 )
             }
             MetricsCommand::Usage { name } => Ok(Prepared::MetricUsage(name.clone())),
+            MetricsCommand::Metadata { name } => {
+                operation("metrics.metadata", Operation::metric_metadata(name))
+            }
+            MetricsCommand::Highlights { name } => {
+                operation("metrics.highlights", Operation::metric_highlights(name))
+            }
+            MetricsCommand::Inspect { name, filter, time } => {
+                let window = window(time, now)?;
+                if window.end_ms.saturating_sub(window.start_ms) > 30 * 60 * 1_000 {
+                    return Err(AppError::validation(
+                        "metrics inspect supports a maximum 30-minute time range",
+                    ));
+                }
+                operation(
+                    "metrics.inspect",
+                    Operation::metric_inspect(
+                        name,
+                        window.start_ms,
+                        window.end_ms,
+                        filter.as_deref(),
+                    ),
+                )
+            }
         },
         Command::Fields { command } => match command {
-            FieldsCommand::Keys { signal } => {
-                operation("fields.keys", Operation::field_keys(signal.as_str()))
+            FieldsCommand::Keys { signal, query } => {
+                let window = window(&query.time, now)?;
+                operation(
+                    "fields.keys",
+                    Operation::field_keys(signal.as_str(), field_query(query, window)),
+                )
             }
-            FieldsCommand::Values { signal, key } => operation(
-                "fields.values",
-                Operation::field_values(signal.as_str(), key),
-            ),
+            FieldsCommand::Values {
+                signal,
+                key,
+                existing_query,
+                query,
+            } => {
+                let window = window(&query.time, now)?;
+                operation(
+                    "fields.values",
+                    Operation::field_values(
+                        signal.as_str(),
+                        key,
+                        existing_query.as_deref(),
+                        field_query(query, window),
+                    ),
+                )
+            }
         },
         Command::Logs { command } => match command {
             LogsCommand::Search {
@@ -527,15 +650,22 @@ fn prepare(
                 filter,
                 aggregation,
                 aggregate_on,
+                group_by,
+                step,
+                page,
                 time,
             } => {
                 let expression = aggregate_expression(*aggregation, aggregate_on.as_deref())?;
+                validate_group_by(group_by)?;
                 operation(
                     "logs.aggregate",
                     Operation::query_raw(log_aggregate(
                         window(time, now)?,
                         filter.as_deref(),
                         &expression,
+                        group_by,
+                        *step,
+                        page.limit,
                     )),
                 )
             }
@@ -554,15 +684,22 @@ fn prepare(
                 filter,
                 aggregation,
                 aggregate_on,
+                group_by,
+                step,
+                page,
                 time,
             } => {
                 let expression = aggregate_expression(*aggregation, aggregate_on.as_deref())?;
+                validate_group_by(group_by)?;
                 operation(
                     "traces.aggregate",
                     Operation::query_raw(trace_aggregate(
                         window(time, now)?,
                         filter.as_deref(),
                         &expression,
+                        group_by,
+                        *step,
+                        page.limit,
                     )),
                 )
             }
@@ -586,7 +723,164 @@ fn prepare(
                     Operation::service_operations(service, value.start_ms, value.end_ms),
                 )
             }
+            ServicesCommand::Dependencies { time } => {
+                let value = window(time, now)?;
+                operation(
+                    "services.dependencies",
+                    Operation::service_dependencies(value.start_ms, value.end_ms),
+                )
+            }
         },
+        Command::Exceptions { command } => match command {
+            ExceptionsCommand::List {
+                service,
+                exception_type,
+                order,
+                order_by,
+                time,
+                page,
+            } => {
+                let value = window(time, now)?;
+                operation(
+                    "exceptions.list",
+                    Operation::exceptions_list(
+                        value.start_ms,
+                        value.end_ms,
+                        order.as_str(),
+                        order_by.as_str(),
+                        page.limit,
+                        page.offset,
+                        exception_type.as_deref(),
+                        service.as_deref(),
+                    ),
+                )
+            }
+            ExceptionsCommand::Count {
+                service,
+                exception_type,
+                time,
+            } => {
+                let value = window(time, now)?;
+                operation(
+                    "exceptions.count",
+                    Operation::exceptions_count(
+                        value.start_ms,
+                        value.end_ms,
+                        exception_type.as_deref(),
+                        service.as_deref(),
+                    ),
+                )
+            }
+            ExceptionsCommand::Group {
+                group_id,
+                timestamp,
+            } => operation(
+                "exceptions.group",
+                Operation::exception_group(group_id, timestamp),
+            ),
+            ExceptionsCommand::Get {
+                group_id,
+                error_id,
+                timestamp,
+            } => operation(
+                "exceptions.get",
+                Operation::exception_get(group_id, error_id, timestamp),
+            ),
+            ExceptionsCommand::Navigate {
+                group_id,
+                error_id,
+                timestamp,
+            } => operation(
+                "exceptions.navigate",
+                Operation::exception_navigation(group_id, error_id, timestamp),
+            ),
+        },
+        Command::Infrastructure { command } => match command {
+            InfrastructureCommand::Check { resource } => operation(
+                "infrastructure.check",
+                Operation::infrastructure_check(resource.as_str()),
+            ),
+            InfrastructureCommand::List {
+                resource,
+                filter,
+                status,
+                group_by,
+                order_by,
+                order,
+                time,
+                page,
+            } => {
+                if status.is_some() && !matches!(resource, InfrastructureResource::Hosts) {
+                    return Err(AppError::validation(
+                        "--status is supported only for infrastructure hosts",
+                    ));
+                }
+                let value = window(time, now)?;
+                let body = infrastructure_list_body(
+                    value,
+                    filter.as_deref(),
+                    status.map(InfrastructureStatus::as_str),
+                    group_by,
+                    order_by.as_deref(),
+                    order.as_str(),
+                    page.limit,
+                    page.offset,
+                )?;
+                operation(
+                    "infrastructure.list",
+                    Operation::infrastructure_list(resource.as_path(), body),
+                )
+            }
+        },
+        Command::Meters { command } => {
+            const ALL_METERS: &[&str] = &[
+                "signoz.meter.log.count",
+                "signoz.meter.log.size",
+                "signoz.meter.span.count",
+                "signoz.meter.span.size",
+                "signoz.meter.metric.datapoint.count",
+            ];
+            match command {
+                MetersCommand::Summary {
+                    filter,
+                    group_by,
+                    step,
+                    time,
+                } => operation(
+                    "meters.summary",
+                    Operation::query_raw(meter_query(
+                        meter_window(time, now)?,
+                        ALL_METERS,
+                        filter.as_deref(),
+                        group_by,
+                        *step,
+                    )),
+                ),
+                MetersCommand::Query {
+                    metric,
+                    filter,
+                    group_by,
+                    step,
+                    time,
+                } => {
+                    if !metric.starts_with("signoz.meter.") {
+                        return Err(AppError::validation(
+                            "meter metric names must start with 'signoz.meter.'",
+                        ));
+                    }
+                    operation(
+                        "meters.query",
+                        Operation::query_raw(meter_query(
+                            meter_window(time, now)?,
+                            &[metric.as_str()],
+                            filter.as_deref(),
+                            group_by,
+                            *step,
+                        )),
+                    )
+                }
+            }
+        }
         Command::Alerts {
             command: AlertsCommand::List { .. },
         } => operation("alerts.list", Operation::alerts_list()),
@@ -617,13 +911,48 @@ fn prepare(
                     ),
                 )
             }
+            RulesCommand::HistoryStats { id, time } => {
+                let value = window(time, now)?;
+                operation(
+                    "rules.history-stats",
+                    Operation::rule_history_stats(id, value.start_ms, value.end_ms),
+                )
+            }
+            RulesCommand::HistoryStatus { id, time } => {
+                let value = window(time, now)?;
+                operation(
+                    "rules.history-status",
+                    Operation::rule_history_overall_status(id, value.start_ms, value.end_ms),
+                )
+            }
+            RulesCommand::HistoryContributors { id, time } => {
+                let value = window(time, now)?;
+                operation(
+                    "rules.history-contributors",
+                    Operation::rule_history_top_contributors(id, value.start_ms, value.end_ms),
+                )
+            }
         },
-        Command::Dashboards { command } => resource(
-            command,
-            "dashboards",
-            Operation::dashboards_list,
-            Operation::dashboard_get,
-        ),
+        Command::Dashboards { command } => match command {
+            DashboardsCommand::List {
+                query,
+                sort,
+                order,
+                page,
+            } => operation(
+                "dashboards.list",
+                Operation::dashboards_list(
+                    query.as_deref(),
+                    sort.as_str(),
+                    order.as_str(),
+                    page.limit,
+                    page.offset,
+                ),
+            ),
+            DashboardsCommand::Get { id } => {
+                operation("dashboards.get", Operation::dashboard_get(id))
+            }
+        },
         Command::Views { command } => match command {
             ViewsCommand::List { source_page, .. } => {
                 operation("views.list", Operation::views_list(source_page.as_str()))
@@ -636,15 +965,16 @@ fn prepare(
             Operation::channels_list,
             Operation::channel_get,
         ),
-        Command::Query {
-            command: QueryCommand::Run { file },
-        } => {
-            let text = read_input(file)?;
-            let mut body = serde_json::from_str(&text)
-                .map_err(|error| AppError::validation(format!("invalid query JSON: {error}")))?;
-            validate_query_builder_v5(&mut body)?;
-            operation("query.run", Operation::query_raw(body))
-        }
+        Command::Query { command } => match command {
+            QueryCommand::Run { file } => {
+                let body = read_query_body(file)?;
+                operation("query.run", Operation::query_raw(body))
+            }
+            QueryCommand::Preview { file, explain } => {
+                let body = read_query_body(file)?;
+                operation("query.preview", Operation::query_preview(body, *explain))
+            }
+        },
     }
 }
 
@@ -667,6 +997,98 @@ fn window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppError> {
         .map_err(AppError::validation)
 }
 
+fn meter_window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppError> {
+    const HOUR_MS: i64 = 60 * 60 * 1_000;
+    let relative = args.start.is_none();
+    let value = if args.since.is_none() && relative {
+        signoz_client::TimeWindowArgs::since("7d")
+    } else {
+        args.as_client_args()
+    };
+    let resolved = value.resolve(now).map_err(AppError::validation)?;
+    let end_ms = resolved.end_ms.div_euclid(HOUR_MS) * HOUR_MS;
+    let (start_ms, end_ms) = if relative {
+        let complete_hours = (resolved.end_ms - resolved.start_ms).div_euclid(HOUR_MS);
+        if complete_hours < 1 {
+            return Err(AppError::validation(
+                "Cost Meter queries require at least one complete hour",
+            ));
+        }
+        (
+            end_ms.saturating_sub(complete_hours.saturating_mul(HOUR_MS)),
+            end_ms,
+        )
+    } else {
+        let start_ms = if resolved.start_ms.rem_euclid(HOUR_MS) == 0 {
+            resolved.start_ms
+        } else {
+            resolved.start_ms.div_euclid(HOUR_MS) * HOUR_MS + HOUR_MS
+        };
+        (start_ms, end_ms)
+    };
+    if start_ms >= end_ms {
+        return Err(AppError::validation(
+            "Cost Meter time range contains no complete hourly buckets",
+        ));
+    }
+    Ok(TimeWindow { start_ms, end_ms })
+}
+
+fn field_query(args: &FieldQueryArgs, window: TimeWindow) -> FieldQuery<'_> {
+    FieldQuery {
+        source: args.source.map(MetricSource::as_str),
+        limit: args.page.limit,
+        start_ms: window.start_ms,
+        end_ms: window.end_ms,
+        context: args.context.map(FieldContext::as_str),
+        data_type: args.data_type.map(FieldDataType::as_str),
+        metric_name: args.metric_name.as_deref(),
+        metric_namespace: args.metric_namespace.as_deref(),
+        search: args.search.as_deref(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn infrastructure_list_body(
+    window: TimeWindow,
+    filter: Option<&str>,
+    status: Option<&str>,
+    group_by: &[String],
+    order_by: Option<&str>,
+    order: &str,
+    limit: u32,
+    offset: u32,
+) -> Result<Value, AppError> {
+    if group_by.iter().any(|value| value.trim().is_empty()) {
+        return Err(AppError::validation("--group-by values must not be empty"));
+    }
+    if order_by.is_some_and(|value| value.trim().is_empty()) {
+        return Err(AppError::validation("--order-by must not be empty"));
+    }
+    let mut filter_value = json!({"expression": filter.unwrap_or_default()});
+    if let Some(status) = status {
+        filter_value["filterByStatus"] = Value::String(status.to_owned());
+    }
+    let mut body = json!({
+        "start": window.start_ms,
+        "end": window.end_ms,
+        "limit": limit.max(1),
+        "offset": offset,
+        "filter": filter_value,
+        "groupBy": group_by
+            .iter()
+            .map(|name| json!({"name": name}))
+            .collect::<Vec<_>>()
+    });
+    if let Some(order_by) = order_by {
+        body["orderBy"] = json!({
+            "key": {"name": order_by},
+            "direction": order,
+        });
+    }
+    Ok(body)
+}
+
 fn aggregate_expression(
     aggregation: AggregateFunction,
     aggregate_on: Option<&str>,
@@ -686,6 +1108,13 @@ fn aggregate_expression(
     })
 }
 
+fn validate_group_by(group_by: &[String]) -> Result<(), AppError> {
+    if group_by.iter().any(|value| value.trim().is_empty()) {
+        return Err(AppError::validation("--group-by values must not be empty"));
+    }
+    Ok(())
+}
+
 fn command_meta(command: &Command, now: DateTime<Utc>) -> Result<Meta, AppError> {
     let (time, page) = match command {
         Command::Metrics { command } => match command {
@@ -695,6 +1124,7 @@ fn command_meta(command: &Command, now: DateTime<Utc>) -> Result<Meta, AppError>
             }
             MetricsCommand::Top { time, page } => (Some(time), Some((page.limit, 0))),
             MetricsCommand::Cardinality { time, .. } => (Some(time), None),
+            MetricsCommand::Inspect { time, .. } => (Some(time), None),
             _ => (None, None),
         },
         Command::Logs { command } => match command {
@@ -708,9 +1138,33 @@ fn command_meta(command: &Command, now: DateTime<Utc>) -> Result<Meta, AppError>
             TracesCommand::Aggregate { time, .. } => (Some(time), None),
             TracesCommand::Get { time, .. } => (Some(time), None),
         },
+        Command::Fields { command } => match command {
+            FieldsCommand::Keys { query, .. } | FieldsCommand::Values { query, .. } => {
+                (Some(&query.time), Some((query.page.limit, 0)))
+            }
+        },
         Command::Services { command } => match command {
             ServicesCommand::List { time, page } => (Some(time), Some((page.limit, page.offset))),
             ServicesCommand::Operations { time, .. } => (Some(time), None),
+            ServicesCommand::Dependencies { time } => (Some(time), None),
+        },
+        Command::Exceptions { command } => match command {
+            ExceptionsCommand::List { time, page, .. } => {
+                (Some(time), Some((page.limit, page.offset)))
+            }
+            ExceptionsCommand::Count { time, .. } => (Some(time), None),
+            _ => (None, None),
+        },
+        Command::Infrastructure { command } => match command {
+            InfrastructureCommand::List { time, page, .. } => {
+                (Some(time), Some((page.limit, page.offset)))
+            }
+            InfrastructureCommand::Check { .. } => (None, None),
+        },
+        Command::Meters { command } => match command {
+            MetersCommand::Summary { time, .. } | MetersCommand::Query { time, .. } => {
+                (Some(time), None)
+            }
         },
         Command::Alerts {
             command: AlertsCommand::List { page },
@@ -720,9 +1174,18 @@ fn command_meta(command: &Command, now: DateTime<Utc>) -> Result<Meta, AppError>
         } => (None, Some((page.limit, page.offset))),
         Command::Rules {
             command: RulesCommand::History { time, .. },
+        }
+        | Command::Rules {
+            command: RulesCommand::HistoryStats { time, .. },
+        }
+        | Command::Rules {
+            command: RulesCommand::HistoryStatus { time, .. },
+        }
+        | Command::Rules {
+            command: RulesCommand::HistoryContributors { time, .. },
         } => (Some(time), None),
         Command::Dashboards {
-            command: ResourceCommand::List { page },
+            command: DashboardsCommand::List { page, .. },
         }
         | Command::Channels {
             command: ResourceCommand::List { page },
@@ -734,7 +1197,11 @@ fn command_meta(command: &Command, now: DateTime<Utc>) -> Result<Meta, AppError>
     };
     let mut meta = Meta::default();
     if let Some(time) = time {
-        let resolved = window(time, now)?;
+        let resolved = if matches!(command, Command::Meters { .. }) {
+            meter_window(time, now)?
+        } else {
+            window(time, now)?
+        };
         meta.start = timestamp_string(resolved.start_ms);
         meta.end = timestamp_string(resolved.end_ms);
     }
@@ -747,7 +1214,8 @@ fn command_meta(command: &Command, now: DateTime<Utc>) -> Result<Meta, AppError>
         Command::Metrics {
             command: MetricsCommand::List { .. }
         }
-    ) {
+    ) || matches!(command, Command::Fields { .. })
+    {
         meta.offset = None;
     }
     if let Command::Rules {
@@ -780,7 +1248,7 @@ fn project_sensitive_response(command: &Command, response: &mut Value) -> Result
     }
 }
 
-fn project_auth_identity(response: &mut Value) -> Result<(), AppError> {
+pub(crate) fn project_auth_identity(response: &mut Value) -> Result<(), AppError> {
     let source = response
         .get("data")
         .and_then(Value::as_object)
@@ -853,9 +1321,6 @@ fn list_page(command: &Command) -> Option<(u32, u32)> {
         | Command::Rules {
             command: RulesCommand::List { page },
         }
-        | Command::Dashboards {
-            command: ResourceCommand::List { page },
-        }
         | Command::Channels {
             command: ResourceCommand::List { page },
         }
@@ -885,10 +1350,7 @@ fn list_shape(command: &Command) -> Option<ListShape> {
         | Command::Rules {
             command: RulesCommand::List { .. },
         } => Some(ListShape::Data),
-        Command::Dashboards {
-            command: ResourceCommand::List { .. },
-        }
-        | Command::Channels {
+        Command::Channels {
             command: ResourceCommand::List { .. },
         }
         | Command::Views {
@@ -958,6 +1420,14 @@ fn tolerant_data_array(response: &mut Value) -> Option<&mut Vec<Value>> {
 
 fn apply_pagination_meta(meta: &mut Meta, response: &Value) {
     let Some(limit) = meta.limit else { return };
+    if let Some(total) = response
+        .pointer("/data/total")
+        .or_else(|| response.get("total"))
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+    {
+        meta.total = Some(total);
+    }
     if let Some(has_more) = response
         .pointer("/data/hasMore")
         .or_else(|| response.get("hasMore"))
@@ -970,6 +1440,8 @@ fn apply_pagination_meta(meta: &mut Meta, response: &Value) {
             .pointer("/data/result")
             .or_else(|| response.pointer("/data/items"))
             .or_else(|| response.pointer("/data/samples"))
+            .or_else(|| response.pointer("/data/dashboards"))
+            .or_else(|| response.pointer("/data/records"))
             .or_else(|| response.get("data"))
             .or_else(|| response.get("result"))
             .or_else(|| response.as_array().map(|_| response))
@@ -977,7 +1449,11 @@ fn apply_pagination_meta(meta: &mut Meta, response: &Value) {
             .map(Vec::len)
     });
     if let Some(count) = count {
-        let inferred = count as u32 >= limit;
+        let offset = meta.offset.unwrap_or(0);
+        let inferred = meta
+            .total
+            .map(|total| offset.saturating_add(count as u32) < total)
+            .unwrap_or(count as u32 >= limit);
         if meta.has_more.is_none() {
             meta.has_more = Some(inferred);
             if inferred {
@@ -988,7 +1464,7 @@ fn apply_pagination_meta(meta: &mut Meta, response: &Value) {
             }
         }
         if meta.has_more == Some(true) {
-            meta.next_offset = Some(meta.offset.unwrap_or(0).saturating_add(count as u32));
+            meta.next_offset = Some(offset.saturating_add(count as u32));
         }
     } else {
         meta.warnings.push(
@@ -1051,6 +1527,24 @@ fn apply_limit_only_metrics_catalog_meta(
         );
     }
     Ok(())
+}
+
+fn apply_field_discovery_meta(meta: &mut Meta, response: &Value) {
+    let complete = response.pointer("/data/complete").and_then(Value::as_bool);
+    if let Some(complete) = complete {
+        meta.has_more = Some(!complete);
+        meta.next_offset = None;
+        if !complete {
+            meta.warnings.push(
+                "field discovery reached the server limit; narrow --search, --context, --type, metric filters, or the time window"
+                    .into(),
+            );
+        }
+    } else {
+        meta.warnings.push(
+            "field discovery response did not expose data.complete; completeness is unknown".into(),
+        );
+    }
 }
 
 fn apply_cursor_pagination_meta(meta: &mut Meta, response: &Value) {
@@ -1125,6 +1619,14 @@ fn read_input(path: &Path) -> Result<String, AppError> {
     }
 }
 
+fn read_query_body(path: &Path) -> Result<Value, AppError> {
+    let text = read_input(path)?;
+    let mut body = serde_json::from_str(&text)
+        .map_err(|error| AppError::validation(format!("invalid query JSON: {error}")))?;
+    validate_query_builder_v5(&mut body)?;
+    Ok(body)
+}
+
 fn validate_query_builder_v5(body: &mut Value) -> Result<(), AppError> {
     let object = body
         .as_object_mut()
@@ -1186,4 +1688,40 @@ fn config_path() -> Result<PathBuf, AppError> {
         .map(PathBuf::from)
         .map(Ok)
         .unwrap_or_else(|| default_config_path().map_err(AppError::config))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+
+    #[test]
+    fn relative_meter_windows_use_only_complete_hours() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 23, 13, 37, 0).unwrap();
+        let args = TimeArgs {
+            since: Some("7d".into()),
+            start: None,
+            end: None,
+        };
+
+        let window = meter_window(&args, now).unwrap();
+
+        assert_eq!(window.end_ms % 3_600_000, 0);
+        assert_eq!(window.end_ms - window.start_ms, 7 * 24 * 3_600_000);
+    }
+
+    #[test]
+    fn meter_windows_reject_ranges_without_a_complete_hour() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 23, 13, 37, 0).unwrap();
+        let args = TimeArgs {
+            since: Some("30m".into()),
+            start: None,
+            end: None,
+        };
+
+        let error = meter_window(&args, now).unwrap_err();
+
+        assert!(error.message.contains("complete hour"));
+    }
 }

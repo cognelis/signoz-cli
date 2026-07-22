@@ -2,7 +2,7 @@ use std::fmt;
 
 use url::Url;
 
-/// A validated SigNoz HTTP(S) origin with no path or credentials.
+/// A validated SigNoz HTTP(S) base URL with no credentials, query, or fragment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SigNozOrigin(String);
 
@@ -18,8 +18,8 @@ impl SigNozOrigin {
         if !parsed.username().is_empty() || parsed.password().is_some() {
             return Err("SigNoz URL must not contain user information".into());
         }
-        if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
-            return Err("SigNoz URL must be an origin without path, query, or fragment".into());
+        if parsed.query().is_some() || parsed.fragment().is_some() {
+            return Err("SigNoz URL must not contain a query or fragment".into());
         }
         Ok(Self(parsed.as_str().trim_end_matches('/').to_owned()))
     }
@@ -50,11 +50,21 @@ mod tests {
     }
 
     #[test]
-    fn rejects_paths_userinfo_queries_and_non_http_schemes() {
+    fn preserves_supported_external_base_paths() {
+        assert_eq!(
+            SigNozOrigin::parse("https://example.com/observability/signoz/")
+                .unwrap()
+                .as_str(),
+            "https://example.com/observability/signoz"
+        );
+    }
+
+    #[test]
+    fn rejects_userinfo_queries_fragments_and_non_http_schemes() {
         for value in [
             "https://user@example.com",
-            "https://example.com/api",
             "https://example.com?q=1",
+            "https://example.com#fragment",
             "file:///tmp/signoz",
         ] {
             assert!(SigNozOrigin::parse(value).is_err(), "accepted {value}");

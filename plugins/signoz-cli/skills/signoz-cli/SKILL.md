@@ -26,6 +26,14 @@ signoz-cli skills install --target claude
 
 This operation is local, idempotent, and needs no SigNoz URL or API key. Rerunning it updates the embedded managed files and preserves unrelated files in the target skill directories.
 
+For a human workstation setup, prefer the guided flow:
+
+```sh
+signoz-cli init
+```
+
+It creates or repairs a profile, masks and verifies the API key before storage, activates the profile, and installs this Skill for Codex and Claude Code by default. It requires a real interactive terminal and never writes partial configuration in a pipeline.
+
 ## Mandatory preflight
 
 For every remote CLI workflow, run the diagnostic preflight before the first data query, even when the API key and URL are already present in the environment:
@@ -54,11 +62,11 @@ For ephemeral shell and CI jobs, set `SIGNOZ_URL` and `SIGNOZ_API_KEY` in the en
 For a persistent workstation profile:
 
 ```sh
-signoz-cli profile add production --url https://your-signoz.example.com
-signoz-cli profile use production
-printf '%s' "$SIGNOZ_API_KEY" | signoz-cli auth login --api-key-stdin
+signoz-cli init
 signoz-cli doctor --output json
 ```
+
+For a non-interactive persistent setup, use `profile add`, `profile use`, and a pipe to `auth login --api-key-stdin`. Login verifies the key before storing it unless `--no-verify` is explicitly requested. Never use `--no-verify` merely to bypass an authentication or network error.
 
 Never add an API key to a command-line flag. The CLI deliberately provides no `--api-key` option. Do not persist the key in repository files.
 
@@ -66,29 +74,39 @@ Never add an API key to a command-line flag. The CLI deliberately provides no `-
 
 ```text
 signoz-cli version
+signoz-cli init
 signoz-cli doctor
+signoz-cli config path|show
 signoz-cli skills install [--target all|codex|claude]
 signoz-cli auth login|check|logout
-signoz-cli profile add|list|show|use|remove
-signoz-cli metrics list|query|top|cardinality|usage
+signoz-cli profile add|update|list|show|use|remove
+signoz-cli metrics list|query|top|cardinality|usage|metadata|highlights|inspect
 signoz-cli fields keys|values
 signoz-cli logs search|aggregate
 signoz-cli traces search|aggregate|get
-signoz-cli services list|operations
+signoz-cli services list|operations|dependencies
+signoz-cli exceptions list|count|group|get|navigate
+signoz-cli infrastructure check|list
+signoz-cli infra check|list
+signoz-cli meters summary|query
 signoz-cli alerts list
-signoz-cli rules list|get|history
+signoz-cli rules list|get|history|history-stats|history-status|history-contributors
 signoz-cli dashboards list|get
 signoz-cli views list --source-page traces|logs|metrics|meter
 signoz-cli views get <id>
 signoz-cli channels list|get
-signoz-cli query run --file <path|->
+signoz-cli query run|preview --file <path|->
 ```
 
 `logs search` is the log lookup command; there is no `logs query` command. Quote filter expressions so the shell does not interpret them. Combine free text with `--search` and structured predicates with `--filter`.
 
-For `metrics query`, omit `--aggregation` unless the user explicitly needs a spatial override. The CLI discovers metric type, temporality, and monotonicity first, then selects a safe time and spatial aggregation; an invalid override is rejected before the query is sent.
+For `metrics query`, omit `--aggregation` unless the user explicitly needs a spatial override. The CLI discovers metric type, temporality, and monotonicity first, then selects a safe time and spatial aggregation; an invalid override is rejected before the query is sent. It supports `--filter`, repeated `--group-by`, `--step`, and the `meter` source.
 
-For `logs aggregate` and `traces aggregate`, use one of the advertised aggregation values. All functions except `count` and `rate` require `--aggregate-on <field>`. These CLI commands return one ungrouped scalar and have no offset pagination; never add `--offset`.
+For `logs aggregate` and `traces aggregate`, use one of the advertised aggregation values. All functions except `count` and `rate` require `--aggregate-on <field>`. Without `--group-by` or `--step` they return one scalar. Repeated `--group-by` produces grouped results, and `--step <seconds>` requests a time series. They have no offset pagination; never add `--offset`.
+
+Use `fields keys|values` with `--search`, `--context`, `--type`, `--metric-name`, `--metric-namespace`, `--source meter`, and a time window to discover valid query fields. A response with `meta.hasMore: true` is incomplete; narrow these filters because the fields APIs do not expose offset pagination.
+
+`services dependencies`, the exception commands, and Explorer `views` are first-party UI/MCP compatibility adapters rather than published stable SigNoz APIs. If the server returns exit code 7, report the capability as unsupported; do not retry another guessed route. Public v2/v5 routes back dashboards, metrics, Query Builder, rule history, and infrastructure.
 
 Example:
 
@@ -113,9 +131,10 @@ signoz-cli --output json logs search \
   > signoz-error-logs.json
 ```
 
-For an arbitrary Query Builder v5 payload, pass JSON by file or stdin:
+For an arbitrary Query Builder v5 payload, preview it before execution when practical, then pass JSON by file or stdin:
 
 ```sh
+signoz-cli --output json query preview --file request.json
 signoz-cli --output json query run --file request.json
 printf '%s' "$QUERY_JSON" | signoz-cli --output json query run --file -
 ```
@@ -133,6 +152,8 @@ Exception: `metrics top` is a fixed-limit ranking with no offset pagination. Nev
 Exception: `metrics list` is a time-windowed, limit-only catalog. Never add `--offset`. If it reaches the cap, narrow `--since`, `--search`, or `--source meter`; if narrowing would change the user's question, report that the catalog result may be incomplete.
 
 Exception: `rules history` uses an opaque cursor, not an offset. When `meta.nextCursor` is present, repeat the same rule ID, time range, filters, limit, and order with `--cursor <meta.nextCursor>`. A full page without `nextCursor` is complete; never add `--offset` to this command.
+
+Exception: Cost Meter commands default to seven days and adjust the range to complete hourly boundaries. They cover all five documented ingestion metrics and enforce a minimum one-hour step. Do not confuse `meters` ingestion/cost data with `metrics usage`, which reports dashboard and alert references.
 
 Treat exit codes as follows:
 

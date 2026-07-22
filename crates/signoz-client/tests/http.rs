@@ -30,6 +30,29 @@ async fn authenticates_and_retries_replay_safe_requests() {
 }
 
 #[tokio::test]
+async fn preserves_reverse_proxy_base_paths_when_building_requests() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/observability/signoz/api/v1/service_accounts/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let transport = HttpTransport::new(
+        SigNozOrigin::parse(&format!("{}/observability/signoz/", server.uri())).unwrap(),
+        Credentials::new("secret"),
+    )
+    .unwrap();
+
+    let response = transport
+        .get("/api/v1/service_accounts/me", &[])
+        .await
+        .unwrap();
+
+    assert_eq!(response.value["ok"], true);
+}
+
+#[tokio::test]
 async fn rejects_responses_above_the_configured_cap() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

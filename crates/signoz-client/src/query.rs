@@ -128,8 +128,23 @@ pub fn log_search(window: TimeWindow, search: Option<&str>, limit: u32, offset: 
     )
 }
 
-pub fn log_aggregate(window: TimeWindow, filter: Option<&str>, aggregation: &str) -> Value {
-    aggregate_query(window, "logs", filter.unwrap_or_default(), aggregation)
+pub fn log_aggregate(
+    window: TimeWindow,
+    filter: Option<&str>,
+    aggregation: &str,
+    group_by: &[String],
+    step_seconds: Option<u32>,
+    limit: u32,
+) -> Value {
+    aggregate_query(
+        window,
+        "logs",
+        filter.unwrap_or_default(),
+        aggregation,
+        group_by,
+        step_seconds,
+        limit,
+    )
 }
 
 pub fn trace_search(window: TimeWindow, filter: Option<&str>, limit: u32, offset: u32) -> Value {
@@ -158,8 +173,23 @@ pub fn trace_search(window: TimeWindow, filter: Option<&str>, limit: u32, offset
     )
 }
 
-pub fn trace_aggregate(window: TimeWindow, filter: Option<&str>, aggregation: &str) -> Value {
-    aggregate_query(window, "traces", filter.unwrap_or_default(), aggregation)
+pub fn trace_aggregate(
+    window: TimeWindow,
+    filter: Option<&str>,
+    aggregation: &str,
+    group_by: &[String],
+    step_seconds: Option<u32>,
+    limit: u32,
+) -> Value {
+    aggregate_query(
+        window,
+        "traces",
+        filter.unwrap_or_default(),
+        aggregation,
+        group_by,
+        step_seconds,
+        limit,
+    )
 }
 
 pub fn trace_get(window: TimeWindow, trace_id: &str) -> Value {
@@ -171,59 +201,120 @@ pub fn trace_get(window: TimeWindow, trace_id: &str) -> Value {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn metric_query(
     window: TimeWindow,
     metric: &str,
     aggregation: &MetricAggregation,
+    filter: Option<&str>,
+    group_by: &[String],
+    step_seconds: u32,
+    source: Option<&str>,
     limit: u32,
     offset: u32,
 ) -> Value {
-    envelope(
-        window,
-        "time_series",
-        json!({
-            "name": "A",
-            "signal": "metrics",
-            "stepInterval": 60,
-            "disabled": false,
-            "filter": {"expression": ""},
-            "limit": limit.max(1),
-            "offset": offset,
-            "order": [{"key": {"name": "__result"}, "direction": "desc"}],
-            "having": {"expression": ""},
-            "selectFields": [],
-            "aggregations": [{
-                "metricName": metric,
-                "temporality": aggregation.temporality,
-                "timeAggregation": aggregation.time_aggregation,
-                "spaceAggregation": aggregation.space_aggregation
-            }]
-        }),
-    )
+    let mut spec = json!({
+        "name": "A",
+        "signal": "metrics",
+        "stepInterval": step_seconds.max(1),
+        "disabled": false,
+        "filter": {"expression": filter.unwrap_or_default()},
+        "limit": limit.max(1),
+        "offset": offset,
+        "order": [{"key": {"name": "__result"}, "direction": "desc"}],
+        "having": {"expression": ""},
+        "selectFields": [],
+        "groupBy": group_by.iter().map(|name| json!({"name": name})).collect::<Vec<_>>(),
+        "aggregations": [{
+            "metricName": metric,
+            "temporality": aggregation.temporality,
+            "timeAggregation": aggregation.time_aggregation,
+            "spaceAggregation": aggregation.space_aggregation
+        }]
+    });
+    if let Some(source) = source.filter(|value| !value.trim().is_empty()) {
+        spec["source"] = Value::String(source.to_owned());
+    }
+    envelope(window, "time_series", spec)
 }
 
-fn aggregate_query(window: TimeWindow, signal: &str, filter: &str, aggregation: &str) -> Value {
+pub fn meter_query(
+    window: TimeWindow,
+    metrics: &[&str],
+    filter: Option<&str>,
+    group_by: &[String],
+    step_seconds: u32,
+) -> Value {
+    let group_by: Vec<_> = group_by.iter().map(|name| json!({"name": name})).collect();
+    let queries: Vec<_> = metrics
+        .iter()
+        .enumerate()
+        .map(|(index, metric)| {
+            json!({
+                "type": "builder_query",
+                "spec": {
+                    "name": format!("M{}", index + 1),
+                    "signal": "metrics",
+                    "source": "meter",
+                    "stepInterval": step_seconds.max(3_600),
+                    "aggregations": [{
+                        "metricName": metric,
+                        "timeAggregation": "increase",
+                        "spaceAggregation": "sum"
+                    }],
+                    "filter": {"expression": filter.unwrap_or_default()},
+                    "groupBy": group_by,
+                    "disabled": false
+                }
+            })
+        })
+        .collect();
+    json!({
+        "schemaVersion": "v1",
+        "start": window.start_ms,
+        "end": window.end_ms,
+        "requestType": "time_series",
+        "compositeQuery": {"queries": queries},
+        "formatOptions": {"formatTableResultForUI": false, "fillGaps": false},
+        "variables": {}
+    })
+}
+
+fn aggregate_query(
+    window: TimeWindow,
+    signal: &str,
+    filter: &str,
+    aggregation: &str,
+    group_by: &[String],
+    step_seconds: Option<u32>,
+    limit: u32,
+) -> Value {
     let expression = if aggregation.contains('(') {
         aggregation.to_owned()
     } else {
         format!("{aggregation}()")
     };
-    envelope(
-        window,
-        "scalar",
-        json!({
-            "name": "A",
-            "signal": signal,
-            "disabled": false,
-            "filter": {"expression": filter},
-            "limit": 1,
-            "order": [{"key": {"name": expression}, "direction": "desc"}],
-            "having": {"expression": ""},
-            "selectFields": [],
-            "groupBy": [],
-            "aggregations": [{"expression": expression}]
-        }),
-    )
+    let request_type = if step_seconds.is_some() {
+        "time_series"
+    } else {
+        "scalar"
+    };
+    let mut spec = json!({
+        "name": "A",
+        "signal": signal,
+        "disabled": false,
+        "filter": {"expression": filter},
+        "limit": if group_by.is_empty() { 1 } else { limit.max(1) },
+        "order": [{"key": {"name": expression}, "direction": "desc"}],
+        "having": {"expression": ""},
+        "selectFields": [],
+        "groupBy": group_by.iter().map(|name| json!({"name": name})).collect::<Vec<_>>(),
+        "aggregations": [{"expression": expression}]
+    });
+    if let Some(step_seconds) = step_seconds {
+        spec["stepInterval"] = json!(step_seconds.max(1));
+    }
+    envelope(window, request_type, spec)
 }
 
 fn envelope(window: TimeWindow, request_type: &str, spec: Value) -> Value {
@@ -252,7 +343,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        log_search, metric_metadata, metric_query, resolve_metric_aggregation, trace_search,
+        log_aggregate, log_search, meter_query, metric_metadata, metric_query,
+        resolve_metric_aggregation, trace_search,
     };
     use crate::TimeWindow;
 
@@ -275,7 +367,17 @@ mod tests {
         )
         .unwrap();
         let aggregation = resolve_metric_aggregation(&metadata, None).unwrap();
-        let metrics = metric_query(window, "http.server.duration", &aggregation, 50, 2);
+        let metrics = metric_query(
+            window,
+            "http.server.duration",
+            &aggregation,
+            Some("service.name = 'api'"),
+            &["service.name".into()],
+            300,
+            None,
+            50,
+            2,
+        );
         assert_eq!(logs["schemaVersion"], "v1");
         assert_eq!(logs["requestType"], "raw");
         assert_eq!(
@@ -299,9 +401,41 @@ mod tests {
             metrics["compositeQuery"]["queries"][0]["spec"]["aggregations"][0]["spaceAggregation"],
             "p99"
         );
+        assert_eq!(
+            metrics["compositeQuery"]["queries"][0]["spec"]["filter"]["expression"],
+            "service.name = 'api'"
+        );
+        assert_eq!(
+            metrics["compositeQuery"]["queries"][0]["spec"]["groupBy"][0]["name"],
+            "service.name"
+        );
+        assert_eq!(
+            metrics["compositeQuery"]["queries"][0]["spec"]["stepInterval"],
+            300
+        );
         assert_eq!(metrics["start"], 1_000);
         assert_eq!(metrics["end"], 2_000);
         assert!(metrics.to_string().contains("http.server.duration"));
+    }
+
+    #[test]
+    fn grouped_aggregations_can_return_bounded_time_series() {
+        let query = log_aggregate(
+            TimeWindow {
+                start_ms: 1_000,
+                end_ms: 2_000,
+            },
+            Some("severity_text = 'ERROR'"),
+            "count()",
+            &["service.name".into()],
+            Some(300),
+            25,
+        );
+        let spec = &query["compositeQuery"]["queries"][0]["spec"];
+        assert_eq!(query["requestType"], "time_series");
+        assert_eq!(spec["stepInterval"], 300);
+        assert_eq!(spec["limit"], 25);
+        assert_eq!(spec["groupBy"][0]["name"], "service.name");
     }
 
     #[test]
@@ -355,5 +489,28 @@ mod tests {
         }]}});
         assert!(metric_metadata(&missing_temporality, "cpu").is_err());
         assert!(metric_metadata(&missing_monotonicity, "requests").is_err());
+    }
+
+    #[test]
+    fn meter_queries_use_the_documented_source_and_increase_aggregation() {
+        let body = meter_query(
+            TimeWindow {
+                start_ms: 1_000,
+                end_ms: 2_000,
+            },
+            &["signoz.meter.log.size", "signoz.meter.span.size"],
+            Some("service.name = 'api'"),
+            &["service.name".into()],
+            86_400,
+        );
+        let queries = body["compositeQuery"]["queries"].as_array().unwrap();
+        assert_eq!(queries.len(), 2);
+        assert_eq!(queries[0]["spec"]["source"], "meter");
+        assert_eq!(
+            queries[0]["spec"]["aggregations"][0]["timeAggregation"],
+            "increase"
+        );
+        assert_eq!(queries[0]["spec"]["stepInterval"], 86_400);
+        assert_eq!(queries[0]["spec"]["groupBy"][0]["name"], "service.name");
     }
 }
