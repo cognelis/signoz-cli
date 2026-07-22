@@ -14,6 +14,7 @@
 
 **Files:**
 - Modify: `crates/signoz-cli/src/args.rs`
+- Modify: `crates/signoz-cli/src/dispatch.rs`
 - Modify: `crates/signoz-cli/tests/help.rs`
 - Test: `crates/signoz-cli/tests/cli.rs`
 
@@ -76,6 +77,7 @@ pub enum SkillTarget {
 ```
 
 Add `Command::Skills { #[command(subcommand)] command: SkillsCommand }` to the top-level enum.
+Add an exhaustive `Command::Skills { .. } => unreachable!("skills are dispatched before command preparation")` arm to `prepare`; Task 3 will add the early local dispatch that makes the invariant true. Until then, the CLI behavior tests remain intentionally red at the missing local-dispatch boundary while the crate continues to compile.
 
 - [ ] **Step 4: Run the help test and verify the command tree is green**
 
