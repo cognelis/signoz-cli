@@ -338,10 +338,10 @@ Set temporary `HOME` and `CLAUDE_CONFIG_DIR`, run the release binary with `skill
 
 Run the plugin-creator cachebuster helper against `plugins/signoz-cli`, keep Codex and Claude manifest versions equal, and run the repository agent-integration validators again.
 
-- [ ] **Step 4: Reinstall both local plugins and inspect installed Skill files**
+- [ ] **Step 4: Review the final diff and merge the feature commit(s) into `main`**
 
-Use `codex plugin add signoz-cli@personal` and the existing non-interactive Claude plugin installation command, then verify each installed cache contains the updated `SKILL.md`.
+Inspect `git status`, `git diff --stat`, and the full diff; fast-forward `main` to the isolated branch only after all verification succeeds. This order matters because both local marketplaces resolve the plugin source from the main checkout, not the linked worktree.
 
-- [ ] **Step 5: Review the final diff and merge the feature commit(s) into `main`**
+- [ ] **Step 5: Reinstall both local plugins and inspect installed Skill files**
 
-Inspect `git status`, `git diff --stat`, and the full diff; fast-forward `main` to the isolated branch only after all verification succeeds.
+From the updated main checkout, use `codex plugin add signoz-cli@personal` and the existing non-interactive Claude plugin installation command, then verify each installed cache contains the updated `SKILL.md`.
