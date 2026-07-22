@@ -1,9 +1,75 @@
+use std::path::Path;
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::json;
 use signoz_cli::output::{Meta, SuccessEnvelope};
 use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn skill_command(home: &Path, claude_config: &Path) -> Command {
+    let config = home.join("broken.toml");
+    std::fs::write(&config, "not valid = [").unwrap();
+
+    let mut command = Command::cargo_bin("signoz-cli").unwrap();
+    command
+        .env("HOME", home)
+        .env("CLAUDE_CONFIG_DIR", claude_config)
+        .env("SIGNOZ_CONFIG", config)
+        .env_remove("SIGNOZ_URL")
+        .env_remove("SIGNOZ_API_KEY");
+    command
+}
+
+#[test]
+fn skills_install_accepts_the_default_target() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+
+    skill_command(home.path(), claude_config.path())
+        .args(["--output", "json", "skills", "install"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn skills_install_accepts_the_codex_target() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+
+    skill_command(home.path(), claude_config.path())
+        .args(["--output", "json", "skills", "install", "--target", "codex"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn skills_install_accepts_the_claude_target() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+
+    skill_command(home.path(), claude_config.path())
+        .args([
+            "--output", "json", "skills", "install", "--target", "claude",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn skills_install_rejects_an_unknown_target() {
+    let home = tempfile::tempdir().unwrap();
+    let claude_config = tempfile::tempdir().unwrap();
+
+    skill_command(home.path(), claude_config.path())
+        .args(["skills", "install", "--target", "unknown"])
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("all"))
+        .stderr(predicate::str::contains("codex"))
+        .stderr(predicate::str::contains("claude"));
+}
 
 #[test]
 fn success_envelope_is_versioned() {

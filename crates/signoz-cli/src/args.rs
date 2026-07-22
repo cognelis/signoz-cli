@@ -37,6 +37,10 @@ pub enum Command {
     Version,
     /// Diagnose local configuration, credentials, connectivity, and authentication.
     Doctor,
+    Skills {
+        #[command(subcommand)]
+        command: SkillsCommand,
+    },
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
@@ -89,6 +93,22 @@ pub enum Command {
         #[command(subcommand)]
         command: QueryCommand,
     },
+}
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum SkillsCommand {
+    Install {
+        #[arg(long, value_enum, default_value_t = SkillTarget::All)]
+        target: SkillTarget,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum SkillTarget {
+    #[default]
+    All,
+    Codex,
+    Claude,
 }
 
 #[derive(Clone, Debug, Subcommand)]

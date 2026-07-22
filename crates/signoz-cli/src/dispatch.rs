@@ -362,6 +362,9 @@ fn prepare(
     match command {
         Command::Version => local("version", json!({"version": env!("CARGO_PKG_VERSION")})),
         Command::Doctor => unreachable!("doctor is dispatched before command preparation"),
+        Command::Skills { .. } => {
+            unreachable!("skills are dispatched before command preparation")
+        }
         Command::Auth { command } => match command {
             AuthCommand::Check => Ok(Prepared::Operation("auth.check", Operation::auth_me())),
             AuthCommand::Login { api_key_stdin } => {

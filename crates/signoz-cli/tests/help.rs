@@ -13,6 +13,7 @@ fn command_tree_is_valid_and_complete() {
     for expected in [
         "version",
         "doctor",
+        "skills",
         "auth",
         "profile",
         "metrics",
