@@ -85,6 +85,14 @@ enum Prepared {
 }
 
 pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
+    if let Command::Completion { shell } = &cli.command {
+        return Ok(DispatchResult {
+            command: "completion".into(),
+            data: Value::String(crate::completion::generate(*shell)),
+            meta: Meta::default(),
+            failure_code: None,
+        });
+    }
     if matches!(&cli.command, Command::Version) {
         return Ok(DispatchResult {
             command: "version".into(),
@@ -230,6 +238,7 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
                     &name,
                     window.start_ms,
                     window.end_ms,
+                    source.as_deref(),
                 ))
                 .await?;
             let metadata = metric_metadata(&catalog.value, &name).map_err(AppError::validation)?;
@@ -447,6 +456,9 @@ fn prepare(
 ) -> Result<Prepared, AppError> {
     match command {
         Command::Version => local("version", json!({"version": env!("CARGO_PKG_VERSION")})),
+        Command::Completion { .. } => {
+            unreachable!("completion is dispatched before command preparation")
+        }
         Command::Init => unreachable!("init is dispatched before command preparation"),
         Command::Doctor => unreachable!("doctor is dispatched before command preparation"),
         Command::Config { command } => match command {
@@ -486,20 +498,38 @@ fn prepare(
                 local("profile.add", json!({"name": name, "url": url}))
             }
             ProfileCommand::Update { name, url } => {
-                config
-                    .update_profile(name, url)
-                    .map_err(AppError::validation)?;
+                let changed = config.update_profile(name, url, store)?;
                 config.save(config_path).map_err(AppError::config)?;
-                local("profile.update", json!({"name": name, "url": url}))
+                Ok(Prepared::Local(DispatchResult {
+                    command: "profile.update".into(),
+                    data: json!({"name": name, "url": config.profiles[name].url}),
+                    meta: Meta {
+                        warnings: if changed {
+                            vec![format!(
+                                "Profile URL changed and the saved API key was cleared; run `signoz-cli --profile {name} auth login` before querying this environment"
+                            )]
+                        } else {
+                            Vec::new()
+                        },
+                        ..Meta::default()
+                    },
+                    failure_code: None,
+                }))
             }
-            ProfileCommand::List => local(
-                "profile.list",
-                serde_json::to_value(&config.profiles)
+            ProfileCommand::List => Ok(Prepared::Local(DispatchResult {
+                command: "profile.list".into(),
+                data: serde_json::to_value(&config.profiles)
                     .map_err(|error| AppError::config(error.to_string()))?,
-            ),
+                meta: Meta {
+                    profile: config.current_profile.clone(),
+                    ..Meta::default()
+                },
+                failure_code: None,
+            })),
             ProfileCommand::Show { name } => {
                 let name = name
                     .clone()
+                    .or_else(|| selected_profile.map(str::to_owned))
                     .or_else(|| config.current_profile.clone())
                     .ok_or_else(|| AppError::config("no current profile"))?;
                 let profile = config
@@ -587,12 +617,7 @@ fn prepare(
                 operation("metrics.highlights", Operation::metric_highlights(name))
             }
             MetricsCommand::Inspect { name, filter, time } => {
-                let window = window(time, now)?;
-                if window.end_ms.saturating_sub(window.start_ms) > 30 * 60 * 1_000 {
-                    return Err(AppError::validation(
-                        "metrics inspect supports a maximum 30-minute time range",
-                    ));
-                }
+                let window = inspect_window(time, now)?;
                 operation(
                     "metrics.inspect",
                     Operation::metric_inspect(
@@ -997,6 +1022,19 @@ fn window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppError> {
         .map_err(AppError::validation)
 }
 
+fn inspect_window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppError> {
+    let window = args
+        .as_client_args_with_default("30m")
+        .resolve(now)
+        .map_err(AppError::validation)?;
+    if window.end_ms.saturating_sub(window.start_ms) > 30 * 60 * 1_000 {
+        return Err(AppError::validation(
+            "metrics inspect supports a maximum 30-minute time range",
+        ));
+    }
+    Ok(window)
+}
+
 fn meter_window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppError> {
     const HOUR_MS: i64 = 60 * 60 * 1_000;
     let relative = args.start.is_none();
@@ -1197,10 +1235,12 @@ fn command_meta(command: &Command, now: DateTime<Utc>) -> Result<Meta, AppError>
     };
     let mut meta = Meta::default();
     if let Some(time) = time {
-        let resolved = if matches!(command, Command::Meters { .. }) {
-            meter_window(time, now)?
-        } else {
-            window(time, now)?
+        let resolved = match command {
+            Command::Meters { .. } => meter_window(time, now)?,
+            Command::Metrics {
+                command: MetricsCommand::Inspect { .. },
+            } => inspect_window(time, now)?,
+            _ => window(time, now)?,
         };
         meta.start = timestamp_string(resolved.start_ms);
         meta.end = timestamp_string(resolved.end_ms);
@@ -1692,9 +1732,63 @@ fn config_path() -> Result<PathBuf, AppError> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn profile_update_saves_the_new_destination_and_reports_credential_invalidation() {
+        struct Store(Cell<bool>);
+        impl CredentialStore for Store {
+            fn get(&self, _: &str) -> Result<Option<String>, String> {
+                panic!("updating the URL must not read a credential")
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), String> {
+                panic!("updating the URL must not store a credential")
+            }
+            fn delete(&self, name: &str) -> Result<(), String> {
+                assert_eq!(name, "prod");
+                assert!(
+                    self.0.replace(false),
+                    "an unchanged URL must not clear credentials"
+                );
+                Ok(())
+            }
+        }
+        let store = Store(Cell::new(true));
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("prod", "https://old.example.com")
+            .unwrap();
+        config.save(&path).unwrap();
+        let command = Command::Profile {
+            command: ProfileCommand::Update {
+                name: "prod".into(),
+                url: "https://new.example.com/".into(),
+            },
+        };
+        for changed in [true, false] {
+            let Prepared::Local(result) =
+                prepare(&command, None, &path, &mut config, &store, Utc::now()).unwrap()
+            else {
+                panic!("profile update must be local");
+            };
+            assert!(!store.0.get());
+            assert_eq!(
+                ConfigFile::load(&path).unwrap().profiles["prod"].url,
+                "https://new.example.com"
+            );
+            assert_eq!(result.data["url"], "https://new.example.com");
+            assert_eq!(!result.meta.warnings.is_empty(), changed);
+            if changed {
+                assert!(result.meta.warnings[0].contains("--profile prod auth login"));
+            }
+        }
+    }
 
     #[test]
     fn relative_meter_windows_use_only_complete_hours() {

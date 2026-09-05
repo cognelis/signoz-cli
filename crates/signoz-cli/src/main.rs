@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+
 use clap::{Parser, error::ErrorKind};
 use signoz_cli::args::{Cli, OutputFormat};
 use signoz_cli::dispatch;
@@ -33,25 +35,27 @@ async fn main() {
         Ok(result) => {
             let failure_code = result.failure_code;
             if cli.verbose {
-                eprintln!(
+                let _ = writeln!(
+                    io::stderr().lock(),
                     "signoz-cli: command={} status={} elapsedMs={}",
                     result.command,
                     result.meta.status.unwrap_or_default(),
                     result.meta.elapsed_ms.unwrap_or_default()
                 );
             }
-            if let Err(message) = emit_success(
+            if let Err(error) = emit_success(
                 cli.output,
                 cli.raw,
                 &result.command,
                 result.data,
                 result.meta,
-            ) {
+            ) && error.kind() != io::ErrorKind::BrokenPipe
+            {
                 emit_error(
                     cli.output,
                     cli.raw,
                     signoz_client::ErrorCode::IncompatibleResponse,
-                    &message,
+                    &format!("failed to write output: {error}"),
                     None,
                     None,
                 );

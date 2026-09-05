@@ -95,12 +95,8 @@ impl Operation {
         operation
     }
 
-    pub fn metrics_search(metric: &str, start_ms: i64, end_ms: i64) -> Self {
-        Self::get("/api/v2/metrics")
-            .query("start", start_ms)
-            .query("end", end_ms)
-            .query("limit", 10)
-            .query("searchText", metric)
+    pub fn metrics_search(metric: &str, start_ms: i64, end_ms: i64, source: Option<&str>) -> Self {
+        Self::metrics_list(start_ms, end_ms, 10, Some(metric), source)
     }
 
     pub fn field_keys(signal: &str, query: FieldQuery<'_>) -> Self {

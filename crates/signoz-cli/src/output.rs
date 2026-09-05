@@ -1,10 +1,12 @@
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 
 use serde::Serialize;
 use serde_json::Value;
 use signoz_client::ErrorCode;
 
 use crate::args::OutputFormat;
+
+mod terminal;
 
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,26 +84,111 @@ pub fn emit_success(
     command: &str,
     data: Value,
     meta: Meta,
-) -> Result<(), String> {
-    if raw {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&data).map_err(|error| error.to_string())?
-        );
-        return Ok(());
+) -> io::Result<()> {
+    let effective = effective_format(format, io::stdout().is_terminal());
+    let mut output = io::BufWriter::new(io::stdout().lock());
+    let mut diagnostics = io::stderr().lock();
+    write_success(
+        &mut output,
+        &mut diagnostics,
+        effective,
+        raw,
+        command,
+        data,
+        meta,
+    )?;
+    output.flush()
+}
+
+fn write_success(
+    output: &mut impl Write,
+    diagnostics: &mut impl Write,
+    format: OutputFormat,
+    raw: bool,
+    command: &str,
+    data: Value,
+    meta: Meta,
+) -> io::Result<()> {
+    if command == "completion" {
+        let script = data.as_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "completion output must be a script",
+            )
+        })?;
+        return output.write_all(script.as_bytes());
     }
-    let effective = match format {
-        OutputFormat::Auto if io::stdout().is_terminal() => OutputFormat::Table,
+    if raw {
+        return write_json(output, &data);
+    }
+    match format {
+        OutputFormat::Json | OutputFormat::Auto => {
+            write_json(output, &SuccessEnvelope::new(command, data, meta))
+        }
+        OutputFormat::Table => {
+            let shortened = terminal::write(
+                output,
+                command,
+                &data,
+                terminal::width(),
+                meta.profile.as_deref(),
+            )?;
+            output.flush()?;
+            write_table_meta(diagnostics, &meta)?;
+            if shortened {
+                writeln!(
+                    diagnostics,
+                    "hint: displayed values were shortened; use --output json for full values"
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn write_json(output: &mut impl Write, value: &impl Serialize) -> io::Result<()> {
+    serde_json::to_writer_pretty(&mut *output, value)?;
+    writeln!(output)
+}
+
+fn effective_format(format: OutputFormat, stdout_is_terminal: bool) -> OutputFormat {
+    match format {
+        OutputFormat::Auto if stdout_is_terminal => OutputFormat::Table,
         OutputFormat::Auto => OutputFormat::Json,
-        value => value,
-    };
-    match effective {
-        OutputFormat::Json | OutputFormat::Auto => println!(
-            "{}",
-            serde_json::to_string_pretty(&SuccessEnvelope::new(command, data, meta))
-                .map_err(|error| error.to_string())?
-        ),
-        OutputFormat::Table => print_table(&data),
+        explicit => explicit,
+    }
+}
+
+fn write_table_meta(diagnostics: &mut impl Write, meta: &Meta) -> io::Result<()> {
+    if let Some(profile) = &meta.profile {
+        writeln!(diagnostics, "Profile: {}", terminal::safe_text(profile))?;
+    }
+    if let (Some(start), Some(end)) = (&meta.start, &meta.end) {
+        writeln!(
+            diagnostics,
+            "Time: {} to {}",
+            terminal::safe_text(start),
+            terminal::safe_text(end)
+        )?;
+    }
+    if meta.has_more == Some(true) {
+        writeln!(
+            diagnostics,
+            "Results: partial; more results may be available"
+        )?;
+        if let Some(offset) = meta.next_offset {
+            writeln!(diagnostics, "hint: continue with --offset {offset}")?;
+        }
+        if let Some(cursor) = &meta.next_cursor {
+            writeln!(
+                diagnostics,
+                "hint: continue with --cursor '{}'",
+                terminal::safe_text(cursor).replace('\'', "'\\''")
+            )?;
+        }
+    }
+    for warning in &meta.warnings {
+        writeln!(diagnostics, "warning: {}", terminal::safe_text(warning))?;
     }
     Ok(())
 }
@@ -114,7 +201,12 @@ pub fn emit_error(
     status: Option<u16>,
     hint: Option<&str>,
 ) {
-    let json_mode = raw || matches!(format, OutputFormat::Json) || !io::stderr().is_terminal();
+    let mut diagnostics = io::stderr().lock();
+    let json_mode = raw
+        || matches!(
+            effective_format(format, io::stdout().is_terminal()),
+            OutputFormat::Json
+        );
     if json_mode {
         let envelope = ErrorEnvelope {
             schema_version: "1",
@@ -125,15 +217,11 @@ pub fn emit_error(
                 hint,
             },
         };
-        eprintln!(
-            "{}",
-            serde_json::to_string_pretty(&envelope)
-                .unwrap_or_else(|_| "{\"error\":{\"code\":\"incompatible_response\"}}".into())
-        );
+        let _ = write_json(&mut diagnostics, &envelope);
     } else {
-        eprintln!("error: {message}");
+        let _ = writeln!(diagnostics, "error: {}", terminal::safe_text(message));
         if let Some(hint) = hint {
-            eprintln!("hint: {hint}");
+            let _ = writeln!(diagnostics, "hint: {}", terminal::safe_text(hint));
         }
     }
 }
@@ -151,38 +239,144 @@ pub fn exit_code(code: ErrorCode) -> i32 {
     }
 }
 
-fn print_table(value: &Value) {
-    let rows = value
-        .as_array()
-        .cloned()
-        .unwrap_or_else(|| vec![value.clone()]);
-    if rows.is_empty() {
-        println!("(no rows)");
-        return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn auto_format_depends_on_stdout_and_explicit_formats_always_win() {
+        assert!(matches!(
+            effective_format(OutputFormat::Auto, true),
+            OutputFormat::Table
+        ));
+        assert!(matches!(
+            effective_format(OutputFormat::Auto, false),
+            OutputFormat::Json
+        ));
+        for terminal in [true, false] {
+            assert!(matches!(
+                effective_format(OutputFormat::Json, terminal),
+                OutputFormat::Json
+            ));
+            assert!(matches!(
+                effective_format(OutputFormat::Table, terminal),
+                OutputFormat::Table
+            ));
+        }
     }
-    if let Some(first) = rows.first().and_then(Value::as_object) {
-        let headers: Vec<_> = first.keys().cloned().collect();
-        println!("{}", headers.join("\t"));
-        for row in rows {
-            if let Some(object) = row.as_object() {
-                let values = headers
-                    .iter()
-                    .map(|header| scalar(object.get(header).unwrap_or(&Value::Null)))
-                    .collect::<Vec<_>>();
-                println!("{}", values.join("\t"));
+
+    fn incomplete_meta() -> Meta {
+        Meta {
+            profile: Some("prod".into()),
+            has_more: Some(true),
+            next_offset: Some(100),
+            warnings: vec!["query reached its limit".into()],
+            ..Meta::default()
+        }
+    }
+
+    #[test]
+    fn table_output_preserves_profile_completeness_and_warnings_on_stderr() {
+        let mut output = Vec::new();
+        let mut diagnostics = Vec::new();
+        write_success(
+            &mut output,
+            &mut diagnostics,
+            OutputFormat::Table,
+            false,
+            "logs.search",
+            json!([{"body": "hello"}]),
+            incomplete_meta(),
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(output).unwrap(), "body\n-----\nhello\n");
+        let diagnostics = String::from_utf8(diagnostics).unwrap();
+        assert!(diagnostics.contains("Profile: prod"));
+        assert!(diagnostics.contains("Results: partial"));
+        assert!(diagnostics.contains("--offset 100"));
+        assert!(diagnostics.contains("warning: query reached its limit"));
+    }
+
+    #[test]
+    fn cursor_and_limit_only_results_do_not_suggest_offset_pagination() {
+        for cursor in [None, Some("next-token".into())] {
+            let meta = Meta {
+                has_more: Some(true),
+                next_cursor: cursor.clone(),
+                ..Meta::default()
+            };
+            let mut diagnostics = Vec::new();
+            write_table_meta(&mut diagnostics, &meta).unwrap();
+            let text = String::from_utf8(diagnostics).unwrap();
+            assert!(text.contains("Results: partial"));
+            assert!(!text.contains("--offset"));
+            assert_eq!(text.contains("--cursor"), cursor.is_some());
+        }
+    }
+
+    #[test]
+    fn json_keeps_its_envelope_and_raw_keeps_only_data_without_diagnostics() {
+        for (format, raw) in [
+            (OutputFormat::Json, false),
+            (OutputFormat::Auto, false),
+            (OutputFormat::Table, true),
+        ] {
+            let mut output = Vec::new();
+            let mut diagnostics = Vec::new();
+            let data = json!([{"body": "hello"}]);
+            write_success(
+                &mut output,
+                &mut diagnostics,
+                format,
+                raw,
+                "logs.search",
+                data.clone(),
+                incomplete_meta(),
+            )
+            .unwrap();
+            let value: Value = serde_json::from_slice(&output).unwrap();
+            if raw {
+                assert_eq!(value, data);
+            } else {
+                assert_eq!(value["data"], data);
+                assert_eq!(value["schemaVersion"], "1");
+                assert_eq!(value["meta"]["profile"], "prod");
+                assert_eq!(value["meta"]["hasMore"], true);
+            }
+            assert!(diagnostics.is_empty());
+        }
+    }
+
+    #[test]
+    fn serialization_and_tables_preserve_io_error_kinds() {
+        struct FailedWriter(io::ErrorKind);
+        impl Write for FailedWriter {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(self.0.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
             }
         }
-    } else {
-        for row in rows {
-            println!("{}", scalar(&row));
+        for kind in [io::ErrorKind::BrokenPipe, io::ErrorKind::PermissionDenied] {
+            for (format, raw) in [
+                (OutputFormat::Json, false),
+                (OutputFormat::Table, false),
+                (OutputFormat::Json, true),
+            ] {
+                let error = write_success(
+                    &mut FailedWriter(kind),
+                    &mut Vec::new(),
+                    format,
+                    raw,
+                    "demo",
+                    json!([{"a": 1}]),
+                    Meta::default(),
+                )
+                .unwrap_err();
+                assert_eq!(error.kind(), kind);
+            }
         }
-    }
-}
-
-fn scalar(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::String(value) => value.clone(),
-        other => other.to_string(),
     }
 }

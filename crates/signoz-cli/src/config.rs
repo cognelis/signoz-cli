@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use signoz_client::{Credentials, SigNozOrigin};
+use signoz_client::{ClientError, Credentials, ErrorCode, SigNozOrigin};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfileConfig {
@@ -111,11 +111,39 @@ impl ConfigFile {
         Ok(())
     }
 
-    pub fn update_profile(&mut self, name: &str, url: &str) -> Result<(), String> {
-        validate_profile_name(name)?;
-        if !self.profiles.contains_key(name) {
-            return Err(format!("profile '{name}' does not exist"));
+    /// Clear the old credential before changing its destination. Returns whether the URL changed.
+    pub fn update_profile(
+        &mut self,
+        name: &str,
+        url: &str,
+        store: &dyn CredentialStore,
+    ) -> Result<bool, ClientError> {
+        validate_profile_name(name)
+            .map_err(|error| ClientError::new(ErrorCode::Validation, error))?;
+        let origin = SigNozOrigin::parse(url)
+            .map_err(|error| ClientError::new(ErrorCode::Validation, error))?;
+        let profile = self.profiles.get_mut(name).ok_or_else(|| {
+            ClientError::new(
+                ErrorCode::Validation,
+                format!("profile '{name}' does not exist"),
+            )
+        })?;
+        if SigNozOrigin::parse(&profile.url).ok().as_ref() == Some(&origin) {
+            return Ok(false);
         }
+        store.delete(name).map_err(|error| {
+            ClientError::new(
+                ErrorCode::Config,
+                format!("could not clear the old API key; profile URL was not changed: {error}"),
+            )
+        })?;
+        profile.url = origin.to_string();
+        Ok(true)
+    }
+
+    /// Used by onboarding, which replaces the credential and rolls it back if saving fails.
+    pub(crate) fn upsert_profile(&mut self, name: &str, url: &str) -> Result<(), String> {
+        validate_profile_name(name)?;
         let origin = SigNozOrigin::parse(url)?;
         self.profiles.insert(
             name.to_owned(),
@@ -124,14 +152,6 @@ impl ConfigFile {
             },
         );
         Ok(())
-    }
-
-    pub fn upsert_profile(&mut self, name: &str, url: &str) -> Result<(), String> {
-        if self.profiles.contains_key(name) {
-            self.update_profile(name, url)
-        } else {
-            self.add_profile(name, url)
-        }
     }
 
     pub fn use_profile(&mut self, name: &str) -> Result<(), String> {
@@ -364,6 +384,108 @@ mod tests {
         assert_eq!(
             store.get("prod").unwrap().as_deref(),
             Some("original-secret")
+        );
+    }
+
+    #[test]
+    fn changing_a_profile_url_requires_a_new_key_and_preserves_other_profiles() {
+        for new_url in [
+            "https://other.example.com",
+            "http://signoz.example.com",
+            "https://signoz.example.com/another-instance",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("config.toml");
+            let store = MemoryStore::default();
+            let mut config = ConfigFile::default();
+            config
+                .add_profile("prod", "https://signoz.example.com")
+                .unwrap();
+            config
+                .add_profile("test", "https://test.example.com")
+                .unwrap();
+            config.use_profile("prod").unwrap();
+            store.set("prod", "old-key").unwrap();
+            store.set("test", "test-key").unwrap();
+
+            assert!(config.update_profile("prod", new_url, &store).unwrap());
+            config.save(&path).unwrap();
+            let config = ConfigFile::load(&path).unwrap();
+            assert_eq!(config.profiles["prod"].url, new_url);
+            assert_eq!(config.current_profile.as_deref(), Some("prod"));
+            assert_eq!(store.get("prod").unwrap(), None);
+            assert_eq!(store.get("test").unwrap().as_deref(), Some("test-key"));
+            let error = config
+                .resolve_inputs(None, Some("prod"), None, None, &store)
+                .unwrap_err();
+            assert!(error.contains("auth login"));
+
+            store.set("prod", "new-key").unwrap();
+            let connection = config
+                .resolve_inputs(None, Some("prod"), None, None, &store)
+                .unwrap();
+            assert_eq!(connection.origin.as_str(), new_url);
+        }
+    }
+
+    #[test]
+    fn an_equivalent_or_invalid_url_never_clears_the_key() {
+        let store = MemoryStore::default();
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("prod", "https://signoz.example.com")
+            .unwrap();
+        store.set("prod", "old-key").unwrap();
+        assert!(
+            !config
+                .update_profile("prod", "https://SIGNOZ.example.com:443/", &store)
+                .unwrap()
+        );
+        assert_eq!(
+            config
+                .update_profile("prod", "file:///tmp/signoz", &store)
+                .unwrap_err()
+                .code(),
+            ErrorCode::Validation
+        );
+        assert_eq!(config.profiles["prod"].url, "https://signoz.example.com");
+        assert_eq!(store.get("prod").unwrap().as_deref(), Some("old-key"));
+    }
+
+    #[test]
+    fn failure_to_clear_a_key_prevents_changing_its_destination() {
+        struct UnavailableStore;
+        impl CredentialStore for UnavailableStore {
+            fn get(&self, _: &str) -> Result<Option<String>, String> {
+                panic!("must not read keys")
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), String> {
+                panic!("must not write keys")
+            }
+            fn delete(&self, _: &str) -> Result<(), String> {
+                Err("keyring unavailable".into())
+            }
+        }
+        let mut config = ConfigFile::default();
+        config
+            .add_profile("prod", "https://original.example.com")
+            .unwrap();
+        assert!(
+            !config
+                .update_profile("prod", "https://original.example.com/", &UnavailableStore)
+                .unwrap()
+        );
+        let error = config
+            .update_profile("prod", "https://new.example.com", &UnavailableStore)
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::Config);
+        assert_eq!(config.profiles["prod"].url, "https://original.example.com");
+        assert_eq!(
+            config
+                .update_profile("missing", "https://new.example.com", &UnavailableStore)
+                .unwrap_err()
+                .code(),
+            ErrorCode::Validation
         );
     }
 

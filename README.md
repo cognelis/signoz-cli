@@ -6,6 +6,19 @@ For general agent-led observability work, use the official [SigNoz Agent Skills]
 
 ## Build and install
 
+Install the prebuilt CLI through npm:
+
+```sh
+npm install -g @cognelis/signoz-cli
+signoz-cli version --output json
+```
+
+The npm installer verifies the matching release binary's SHA-256. macOS, Windows,
+and glibc-based Linux builds are provided for x64 and ARM64; see the
+[npm package requirements](build/npm/README.md). No Rust toolchain is required.
+
+To build from source:
+
 Rust stable is required.
 
 ```sh
@@ -15,6 +28,60 @@ signoz-cli version --output json
 ```
 
 The binary is named `signoz-cli`.
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and migration notes, and
+[CONTRIBUTING.md](CONTRIBUTING.md) for the versioning and release workflow.
+The [publishing guide](docs/releasing.md) covers release assets, npm permissions,
+and trusted publishing.
+
+## Shell completion
+
+Generate completion scripts for zsh, bash, fish, PowerShell, or elvish from the
+same command definitions as the CLI. They cover subcommands, aliases, options,
+declared enum values (such as `--output`), and query `--file` paths. Generation
+requires no configuration, API key, or SigNoz connection.
+
+For the current zsh session:
+
+```zsh
+autoload -Uz compinit && compinit
+source <(signoz-cli completion zsh)
+```
+
+For persistent zsh completion, save the script in a user-owned directory:
+
+```zsh
+mkdir -p ~/.zfunc
+signoz-cli completion zsh > ~/.zfunc/_signoz-cli
+```
+
+Add `~/.zfunc` to `fpath` **before** the existing `compinit` call in `~/.zshrc`:
+
+```zsh
+fpath=("$HOME/.zfunc" $fpath)
+autoload -Uz compinit && compinit
+```
+
+Start a new shell after configuring it. Other shell examples:
+
+```sh
+# bash, current session
+source <(signoz-cli completion bash)
+# Generate scripts for other shells, then load them using that shell's startup setup
+signoz-cli completion fish > signoz-cli.fish
+signoz-cli completion powershell > signoz-cli.ps1
+signoz-cli completion elvish > signoz-cli.elv
+```
+
+Saved scripts are static: regenerate them after upgrading the CLI. Profile names,
+metric names, and remote resources are not dynamically queried when pressing Tab.
+Menu candidates use short descriptions; detailed explanations remain available
+through `--help`. After regenerating a saved zsh script, source that file again
+in the current shell or start a new shell to replace its previously loaded functions.
+Arbitrary filters and other free-form values do not gain semantic completion.
+`completion` always writes shell code to stdout, even with `--output json` or
+`--raw`; it must not be parsed as a JSON response. Run `signoz-cli completion --help`
+for supported shells and a quick zsh setup example.
 
 ## Authenticate
 
@@ -46,6 +113,20 @@ signoz-cli doctor --output json
 
 Running `signoz-cli auth login` without `--api-key-stdin` opens a masked prompt. Use `--no-verify` only for an intentional offline setup; the JSON result records a warning. There is intentionally no `--api-key` flag, so the secret does not enter shell history or process listings. `signoz-cli config show` never includes credentials, and `signoz-cli config path` remains usable even if the config file is malformed.
 
+Keep test and production instances in separate profiles. Select a profile for one command with `--profile`, or change the default with `profile use`:
+
+```sh
+signoz-cli --profile test init
+signoz-cli --profile prod init
+signoz-cli profile use test
+signoz-cli --profile prod profile show
+signoz-cli --profile prod doctor --output json
+```
+
+`profile show <name>` selects the positional name first, then `--profile`, then the default profile. Connection URLs follow `--url`, `--profile`, `SIGNOZ_URL`, then the default profile. `SIGNOZ_API_KEY` overrides the selected profile's saved key; unset it to use that profile's credential.
+
+Changing an instance address with `profile update <name> --url <url>` clears its saved API key before saving the new URL. Authenticate again with `signoz-cli --profile <name> auth login`. An equivalent normalized URL preserves the key. If the credential store cannot clear the old key, the URL is not changed.
+
 ## Diagnose a connection
 
 Run the read-only diagnostic before remote automation or when a connection fails:
@@ -56,7 +137,7 @@ signoz-cli doctor --output json
 
 It checks the CLI version, connection configuration, credential availability, API connectivity, and service-account authentication in order. It sends one request to the same identity endpoint used by `auth check` and never emits the API key.
 
-A completed doctor run always writes its ordered `pass`/`fail`/`skipped` check array to stdout. An unhealthy result still exits with the matching nonzero code below, so scripts should capture stdout before testing the status. Stderr stays empty unless `--verbose` is explicitly requested. `auth check` remains available when only the authenticated service-account identity is needed.
+A completed doctor run always writes its ordered `pass`/`fail`/`skipped` check array to stdout. An unhealthy result still exits with the matching nonzero code below, so scripts should capture stdout before testing the status. In JSON and raw modes, stderr stays empty unless `--verbose` is explicitly requested. `auth check` remains available when only the authenticated service-account identity is needed.
 
 ## Query SigNoz
 
@@ -92,6 +173,8 @@ printf '%s' "$QUERY_JSON" | signoz-cli --output json query run --file -
 
 Use `--since` with `ms`, `s`, `m`, `h`, or `d`, or provide both `--start` and `--end` as RFC3339 timestamps or `@<unix-ms>`. The metric query command reads the metric catalog first and derives safe time/spatial aggregation from its type, temporality, and monotonicity; `--aggregation` only overrides the spatial aggregation. Metrics, log aggregates, and trace aggregates support filtering and grouping; aggregate `--step` switches scalar/grouped output to a time series. Raw searches and ordinary resource lists accept `--limit` and `--offset`; the JSON `meta` reports the resolved time window and pagination state. Alert-rule history uses `--cursor`/`meta.nextCursor` instead of offsets. The time-windowed metrics and field catalogs have a limit but no offset; narrow an incomplete response with their search/context/type/source/time filters. Run `signoz-cli --help` and `signoz-cli <group> <command> --help` for the exact command surface.
 
+`metrics query --source meter` uses the meter source for both catalog metadata and the query. `metrics inspect` defaults to the last 30 minutes and rejects any time range longer than 30 minutes.
+
 Successful JSON output has a stable versioned envelope:
 
 ```json
@@ -108,10 +191,17 @@ Successful JSON output has a stable versioned envelope:
 
 `--raw` emits only the command data payload without the versioned envelope (direct commands keep the upstream shape; composite and client-paginated commands may combine or slice it). Normal diagnostics and errors are written to stderr; stdout remains clean for pipelines. The exception is `doctor`: a completed unhealthy diagnosis writes its report to stdout before exiting nonzero. `--output auto` uses a table only when stdout is a terminal.
 
+Table output reports the selected profile, partial-result status, pagination hints, and warnings on stderr. JSON retains these fields in `meta`; `--raw` emits only the data. When a downstream consumer such as `head` closes stdout early, successful commands exit cleanly without a broken-pipe panic.
+
+The terminal display expands nested result collections into rows and sections. Columns follow a predictable order and include fields that appear only in later rows. Configuration uses key/value details; profile lists mark the default with `*`. Column widths account for Chinese and other wide characters. The display follows `COLUMNS` or the terminal width (100 columns when unavailable), and switches to per-record details when columns cannot fit. Multiline text and control characters are escaped for display. Shortened values end in `…` and produce a hint to use `--output json` for the full values; JSON and raw payloads are never shortened by the display.
+
+`--output auto` selects both success and error formatting from whether stdout is a terminal. Explicit `--output table` keeps human-readable output even when captured, while `--output json` keeps structured output. `--raw` always selects JSON data output. Scripts and agents should request `--output json` and read the exit code and metadata instead of parsing table layout or treating all stderr text as a failure.
+
 ## Command groups
 
 ```text
 version
+completion <bash|elvish|fish|powershell|zsh>
 init
 doctor
 config path|show

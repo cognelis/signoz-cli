@@ -12,6 +12,7 @@ fn command_tree_is_valid_and_complete() {
         .collect();
     for expected in [
         "version",
+        "completion",
         "init",
         "doctor",
         "config",
@@ -111,4 +112,15 @@ fn command_tree_is_valid_and_complete() {
         ])
         .is_ok()
     );
+}
+
+#[test]
+fn metric_inspect_help_explains_its_default_and_limit() {
+    assert_cmd::Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["metrics", "inspect", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("default: --since 30m"))
+        .stdout(predicates::str::contains("at most 30 minutes"));
 }

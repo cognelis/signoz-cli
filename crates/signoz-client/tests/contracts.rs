@@ -31,7 +31,7 @@ async fn every_read_operation_uses_its_official_route() {
             "/api/v2/metrics",
         ),
         (
-            Operation::metrics_search("requests", 1, 2),
+            Operation::metrics_search("requests", 1, 2, None),
             Method::GET,
             "/api/v2/metrics",
         ),
@@ -224,7 +224,7 @@ fn cardinality_and_field_values_use_the_official_query_names() {
     assert_eq!(values.query_value("key"), None);
     let views = Operation::views_list("traces");
     assert_eq!(views.query_value("sourcePage"), Some("traces"));
-    let metrics = Operation::metrics_search("http.requests", 10, 20);
+    let metrics = Operation::metrics_search("http.requests", 10, 20, None);
     assert_eq!(metrics.query_value("searchText"), Some("http.requests"));
     assert_eq!(metrics.query_value("start"), Some("10"));
     assert_eq!(metrics.query_value("end"), Some("20"));
