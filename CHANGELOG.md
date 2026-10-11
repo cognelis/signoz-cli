@@ -6,6 +6,8 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-12
+
 ### Changed
 
 - Release binaries no longer include a symbol table, which makes them about a

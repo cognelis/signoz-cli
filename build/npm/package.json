@@ -1,6 +1,6 @@
 {
   "name": "@cognelis/signoz-cli",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Read-only SigNoz queries, diagnostics, profiles, and shell completion for terminals and coding agents.",
   "homepage": "https://github.com/cognelis/signoz-cli#readme",
   "repository": {
