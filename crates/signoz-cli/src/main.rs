@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use clap::{Parser, error::ErrorKind};
 use signoz_cli::args::{Cli, OutputFormat};
 use signoz_cli::dispatch;
-use signoz_cli::output::{emit_error, emit_success, exit_code};
+use signoz_cli::output::{emit_error, emit_success, exit_code, json_mode};
 
 #[tokio::main]
 async fn main() {
@@ -20,14 +20,22 @@ async fn main() {
         }
         Err(error) => {
             let arguments: Vec<_> = std::env::args().collect();
-            emit_error(
-                requested_output_format(&arguments),
-                arguments.iter().any(|argument| argument == "--raw"),
-                signoz_client::ErrorCode::Validation,
-                &error.to_string(),
-                None,
-                Some("Run `signoz-cli --help` or the subcommand's `--help`"),
-            );
+            let format = requested_output_format(&arguments);
+            let raw = arguments.iter().any(|argument| argument == "--raw");
+            if json_mode(format, raw) {
+                emit_error(
+                    format,
+                    raw,
+                    signoz_client::ErrorCode::Validation,
+                    &error.to_string(),
+                    None,
+                    Some("Run `signoz-cli --help` or the subcommand's `--help`"),
+                );
+            } else {
+                // Clap's rendering keeps multi-line usage errors and the help shown for a
+                // missing subcommand readable; the single-line text writer would escape them.
+                let _ = error.print();
+            }
             std::process::exit(2);
         }
     };

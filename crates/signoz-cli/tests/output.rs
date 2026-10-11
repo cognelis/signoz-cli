@@ -81,14 +81,34 @@ fn explicit_table_errors_remain_human_readable_when_stderr_is_captured() {
             .clone();
         if options.contains(&"table") && !options.contains(&"--raw") {
             let stderr = String::from_utf8(output.stderr).unwrap();
-            assert!(stderr.starts_with("error: "));
-            assert!(stderr.contains("unexpected argument"));
-            assert!(stderr.contains("hint: "));
+            assert!(
+                stderr.starts_with("error: unexpected argument '--invented-flag'"),
+                "{stderr}"
+            );
+            assert!(stderr.contains("\nUsage: signoz-cli"), "{stderr}");
+            assert!(!stderr.contains("\\n"), "{stderr}");
         } else {
             let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
             assert_eq!(error["error"]["code"], "validation");
         }
     }
+}
+
+#[test]
+fn table_help_for_a_missing_subcommand_keeps_its_line_breaks() {
+    // A group without a subcommand shows its help, as `signoz-cli` alone does on a terminal.
+    let output = assert_cmd::Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .args(["--output", "table", "logs"])
+        .assert()
+        .code(2)
+        .stdout("")
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stderr.starts_with("error:"), "{stderr}");
+    assert!(stderr.contains("\nUsage: signoz-cli logs"), "{stderr}");
+    assert!(!stderr.contains("\\n"), "{stderr}");
 }
 
 #[test]

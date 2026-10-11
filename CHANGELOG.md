@@ -6,6 +6,12 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+### Fixed
+
+- On a terminal, usage errors and the help shown for a missing subcommand, such as
+  `signoz-cli` alone, keep their line breaks instead of printing as one line with
+  escaped newlines.
+
 ## [0.4.0] - 2026-09-06
 
 ### Added

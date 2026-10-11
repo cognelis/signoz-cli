@@ -202,12 +202,7 @@ pub fn emit_error(
     hint: Option<&str>,
 ) {
     let mut diagnostics = io::stderr().lock();
-    let json_mode = raw
-        || matches!(
-            effective_format(format, io::stdout().is_terminal()),
-            OutputFormat::Json
-        );
-    if json_mode {
+    if json_mode(format, raw) {
         let envelope = ErrorEnvelope {
             schema_version: "1",
             error: ErrorBody {
@@ -224,6 +219,14 @@ pub fn emit_error(
             let _ = writeln!(diagnostics, "hint: {}", terminal::safe_text(hint));
         }
     }
+}
+
+/// Whether errors are written as a JSON envelope rather than as text for a person.
+pub fn json_mode(format: OutputFormat, raw: bool) -> bool {
+    raw || matches!(
+        effective_format(format, io::stdout().is_terminal()),
+        OutputFormat::Json
+    )
 }
 
 pub fn exit_code(code: ErrorCode) -> i32 {
