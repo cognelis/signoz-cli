@@ -6,6 +6,8 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-12
+
 ### Fixed
 
 - On a terminal, usage errors and the help shown for a missing subcommand, such as
