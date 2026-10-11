@@ -6,6 +6,12 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+### Changed
+
+- Release binaries no longer include a symbol table, which makes them about a
+  quarter smaller. Panic messages still name the source file and line; only
+  `RUST_BACKTRACE` call stacks lose their function names.
+
 ### Fixed
 
 - The npm installer no longer fails on slow connections. A binary download now
