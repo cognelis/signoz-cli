@@ -6,6 +6,8 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-12
+
 ### Changed
 
 - `alerts list --help` says it returns the alert instances Alertmanager holds now,
