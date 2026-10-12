@@ -105,7 +105,7 @@ signoz-cli doctor --output json
 For scripts that intentionally persist a profile, profiles store only the instance URL in the operating-system config directory. API keys are verified before they are stored in the operating-system keyring.
 
 ```sh
-signoz-cli profile add production --url https://your-signoz.example.com
+signoz-cli profile add production --url https://your-signoz.example.com --description "Production observability"
 signoz-cli profile use production
 printf '%s' "$SIGNOZ_API_KEY" | signoz-cli auth login --api-key-stdin
 signoz-cli doctor --output json
@@ -126,6 +126,8 @@ signoz-cli --profile prod doctor --output json
 `profile show <name>` selects the positional name first, then `--profile`, then the default profile. Connection URLs follow `--url`, `--profile`, `SIGNOZ_URL`, then the default profile. `SIGNOZ_API_KEY` overrides the selected profile's saved key; unset it to use that profile's credential.
 
 Changing an instance address with `profile update <name> --url <url>` clears its saved API key before saving the new URL. Authenticate again with `signoz-cli --profile <name> auth login`. An equivalent normalized URL preserves the key. If the credential store cannot clear the old key, the URL is not changed.
+
+`profile add` and `profile update` accept `--description` to record what an environment is for; `profile list` and `profile show` return it. A description is trimmed and must be one line of at most 200 characters, `--description ""` clears it, and changing only the description keeps the saved API key. The bundled skill chooses a profile by its name and description: it uses a profile the user names, matches an environment or purpose that the request mentions against `profile list`, asks the user when several profiles or none could match, and uses the default profile only when the request names no environment.
 
 ## Diagnose a connection
 

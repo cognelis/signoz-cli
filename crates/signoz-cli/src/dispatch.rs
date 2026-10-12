@@ -490,19 +490,59 @@ fn prepare(
             }
         },
         Command::Profile { command } => match command {
-            ProfileCommand::Add { name, url } => {
+            ProfileCommand::Add {
+                name,
+                url,
+                description,
+            } => {
+                let description = description
+                    .as_deref()
+                    .map(profile_description)
+                    .transpose()?;
                 config
                     .add_profile(name, url)
                     .map_err(AppError::validation)?;
+                let profile = config
+                    .profiles
+                    .get_mut(name)
+                    .expect("the profile was just added");
+                profile.description = description.filter(|text| !text.is_empty());
+                let data = profile_value(name, url, profile.description.as_deref());
                 config.save(config_path).map_err(AppError::config)?;
-                local("profile.add", json!({"name": name, "url": url}))
+                local("profile.add", data)
             }
-            ProfileCommand::Update { name, url } => {
-                let changed = config.update_profile(name, url, store)?;
+            ProfileCommand::Update {
+                name,
+                url,
+                description,
+            } => {
+                if url.is_none() && description.is_none() {
+                    return Err(AppError::validation(
+                        "profile update needs --url or --description",
+                    ));
+                }
+                let description = description
+                    .as_deref()
+                    .map(profile_description)
+                    .transpose()?;
+                let changed = match url {
+                    Some(url) => config.update_profile(name, url, store)?,
+                    None if config.profiles.contains_key(name) => false,
+                    None => {
+                        return Err(AppError::validation(format!(
+                            "profile '{name}' does not exist"
+                        )));
+                    }
+                };
+                let profile = config.profiles.get_mut(name).expect("the profile exists");
+                if let Some(text) = description {
+                    profile.description = (!text.is_empty()).then_some(text);
+                }
+                let data = profile_value(name, &profile.url, profile.description.as_deref());
                 config.save(config_path).map_err(AppError::config)?;
                 Ok(Prepared::Local(DispatchResult {
                     command: "profile.update".into(),
-                    data: json!({"name": name, "url": config.profiles[name].url}),
+                    data,
                     meta: Meta {
                         warnings: if changed {
                             vec![format!(
@@ -536,7 +576,10 @@ fn prepare(
                     .profiles
                     .get(&name)
                     .ok_or_else(|| AppError::config(format!("profile '{name}' does not exist")))?;
-                local("profile.show", json!({"name": name, "url": profile.url}))
+                local(
+                    "profile.show",
+                    profile_value(&name, &profile.url, profile.description.as_deref()),
+                )
             }
             ProfileCommand::Use { name } => {
                 config.use_profile(name).map_err(AppError::config)?;
@@ -1010,6 +1053,26 @@ fn local(command: &str, data: Value) -> Result<Prepared, AppError> {
         meta: Meta::default(),
         failure_code: None,
     }))
+}
+
+/// A profile's name, URL, and description; API keys never live in a profile.
+fn profile_value(name: &str, url: &str, description: Option<&str>) -> Value {
+    let mut value = json!({"name": name, "url": url});
+    if let Some(text) = description {
+        value["description"] = json!(text);
+    }
+    value
+}
+
+/// A description is one trimmed line of at most 200 characters; empty clears it.
+fn profile_description(text: &str) -> Result<String, AppError> {
+    let text = text.trim();
+    if text.chars().count() > 200 || text.chars().any(char::is_control) {
+        return Err(AppError::validation(
+            "a profile description must be one line of at most 200 characters",
+        ));
+    }
+    Ok(text.to_owned())
 }
 
 fn operation(command: &'static str, value: Operation) -> Result<Prepared, AppError> {
@@ -1768,7 +1831,8 @@ mod tests {
         let command = Command::Profile {
             command: ProfileCommand::Update {
                 name: "prod".into(),
-                url: "https://new.example.com/".into(),
+                url: Some("https://new.example.com/".into()),
+                description: None,
             },
         };
         for changed in [true, false] {

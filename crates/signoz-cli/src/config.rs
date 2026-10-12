@@ -9,6 +9,9 @@ use signoz_client::{ClientError, Credentials, ErrorCode, SigNozOrigin};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfileConfig {
     pub url: String,
+    /// What the environment is for, so people and agents can choose the right profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -106,6 +109,7 @@ impl ConfigFile {
             name.to_owned(),
             ProfileConfig {
                 url: origin.to_string(),
+                description: None,
             },
         );
         Ok(())
@@ -144,13 +148,20 @@ impl ConfigFile {
     /// Used by onboarding, which replaces the credential and rolls it back if saving fails.
     pub(crate) fn upsert_profile(&mut self, name: &str, url: &str) -> Result<(), String> {
         validate_profile_name(name)?;
-        let origin = SigNozOrigin::parse(url)?;
-        self.profiles.insert(
-            name.to_owned(),
-            ProfileConfig {
-                url: origin.to_string(),
-            },
-        );
+        let url = SigNozOrigin::parse(url)?.to_string();
+        match self.profiles.get_mut(name) {
+            // Re-running setup keeps the profile's description.
+            Some(profile) => profile.url = url,
+            None => {
+                self.profiles.insert(
+                    name.to_owned(),
+                    ProfileConfig {
+                        url,
+                        description: None,
+                    },
+                );
+            }
+        }
         Ok(())
     }
 
@@ -500,12 +511,17 @@ mod tests {
             "https://first.signoz.example.com"
         );
 
+        config.profiles.get_mut("prod").unwrap().description = Some("Production".into());
         config
             .upsert_profile("prod", "https://second.signoz.example.com")
             .unwrap();
         assert_eq!(
             config.profiles["prod"].url,
             "https://second.signoz.example.com"
+        );
+        assert_eq!(
+            config.profiles["prod"].description.as_deref(),
+            Some("Production")
         );
     }
 

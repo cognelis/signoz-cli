@@ -67,7 +67,12 @@ struct Renderer<'a, W> {
 impl<W: Write> Renderer<'_, W> {
     fn profiles(&mut self, profiles: &Map<String, Value>, current: Option<&str>) -> io::Result<()> {
         let rows: Vec<Value> = profiles.iter().map(|(name, profile)| {
-            json!({"current": if current == Some(name) { "*" } else { "" }, "name": name, "url": profile.get("url").unwrap_or(&Value::Null)})
+            let mut row = json!({"current": if current == Some(name) { "*" } else { "" }, "name": name, "url": profile.get("url").unwrap_or(&Value::Null)});
+            // The column appears only once some profile is described.
+            if let Some(description) = profile.get("description") {
+                row["description"] = description.clone();
+            }
+            row
         }).collect();
         self.array(&rows, 0, false)
     }
@@ -312,7 +317,9 @@ fn expand_query_row(row: &Value) -> Cow<'_, Value> {
 fn ordered_keys<'a>(command: &str, keys: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
     let preferred: &[&str] = match command {
         "doctor" => &["name", "status", "message"],
-        "profile.list" | "config.show" => &["current", "name", "url", "current_profile"],
+        "profile.list" | "config.show" => {
+            &["current", "name", "description", "url", "current_profile"]
+        }
         "skills.install" => &["agent", "status", "path"],
         "metrics.list" | "metrics.top" => &[
             "metricName",

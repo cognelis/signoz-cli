@@ -6,6 +6,14 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+### Added
+
+- Profile descriptions: `profile add|update --description` records what an
+  environment is for, and `profile list` and `profile show` return it. `profile
+  update` now needs `--url`, `--description`, or both, and a description change
+  keeps the saved API key. The bundled skill chooses a profile by its name and
+  description, and asks the user when several profiles or none could match.
+
 ## [0.4.2] - 2026-10-12
 
 ### Changed

@@ -98,7 +98,14 @@ Never add an API key to a command-line flag. The CLI deliberately provides no `-
 
 ## Select an environment
 
-For test and production profiles, pass the same explicit `--profile <name>` to the diagnostic and every query in that workflow. Use names already configured by the user. `profile use <name>` changes the persisted default; a single query can select its profile without changing that default.
+Choose the profile before the first query of a workflow:
+
+1. If the user names a configured profile, use it.
+2. If the request names an environment, purpose, or instance, run `signoz-cli --output json profile list` and match the request against each profile's name and `description`. Use the profile that clearly matches.
+3. If several profiles could match or none does, ask the user which profile to use. Never fall back to the default profile for a request about a different environment.
+4. If the request names no environment, use the default profile, which `profile list` reports as `meta.profile`.
+
+Pass the chosen `--profile <name>` explicitly to the diagnostic and every query in that workflow, and tell the user which profile you used. Use names already configured by the user. Descriptions are the user's own labels, set with `profile add|update --description`; change them only when asked. `profile use <name>` changes the persisted default; a single query can select its profile without changing that default.
 
 ```sh
 signoz-cli --profile prod profile show
@@ -109,7 +116,7 @@ signoz-cli --profile prod --output json logs search --since 1h
 
 Connection URLs resolve in this order: `--url`, `--profile`, `SIGNOZ_URL`, then the default profile. `profile show` selects its positional name first, then `--profile`, then the default profile. `SIGNOZ_API_KEY` overrides the selected profile's stored key even when `--profile` is explicit; unset it when the user intends to use that profile's own saved key.
 
-`profile update <name> --url <url>` clears the saved API key when the normalized URL changes. Reauthenticate with `signoz-cli --profile <name> auth login` before querying with a saved credential. An equivalent normalized URL keeps the key; a failure to clear the old key prevents the URL change.
+`profile update <name> --url <url>` clears the saved API key when the normalized URL changes. Reauthenticate with `signoz-cli --profile <name> auth login` before querying with a saved credential. An equivalent normalized URL keeps the key; a failure to clear the old key prevents the URL change. `profile update <name> --description <text>` changes only the description and keeps the key.
 
 ## Supported commands
 

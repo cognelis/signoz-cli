@@ -212,13 +212,23 @@ pub enum ProfileCommand {
         /// Set the instance URL.
         #[arg(long)]
         url: String,
+        /// Describe what the environment is for.
+        ///
+        /// Shown by `profile list` and `profile show` so people and agents can choose the right profile. One line of at most 200 characters.
+        #[arg(long)]
+        description: Option<String>,
     },
-    /// Change an environment URL.
+    /// Change an environment's URL or description.
     Update {
         name: String,
         /// Set the instance URL.
         #[arg(long)]
-        url: String,
+        url: Option<String>,
+        /// Describe what the environment is for.
+        ///
+        /// One line of at most 200 characters; an empty value clears it.
+        #[arg(long)]
+        description: Option<String>,
     },
     /// List saved environments.
     List,
