@@ -6,6 +6,8 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-12
+
 ### Added
 
 - Profile descriptions: `profile add|update --description` records what an
