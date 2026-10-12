@@ -6,6 +6,8 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-12
+
 ### Added
 
 - A choice of credential store: `config set credential-store keychain|security|file`,
