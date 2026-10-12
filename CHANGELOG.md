@@ -6,6 +6,24 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+### Added
+
+- A choice of credential store: `config set credential-store keychain|security|file`,
+  or `SIGNOZ_CLI_CREDENTIAL_STORE`. `security` uses macOS `/usr/bin/security`, so
+  keychain approvals survive CLI upgrades. `file` keeps API keys in an owner-only
+  file and needs confirmation in an interactive terminal. `--migrate` moves existing
+  API keys to the new store.
+
+### Changed
+
+- `doctor` reports where the API key came from.
+- The bundled skill triggers for SigNoz investigations unless the SigNoz MCP server
+  is configured, with a description short enough for agents' skill lists. It uses a
+  production profile only when the request names production, answers questions
+  about a whole environment from each of its profiles, runs `doctor` once per
+  profile in a session, matches both spellings of log severities, and documents the
+  result paths of common commands and the units of `services list`.
+
 ## [0.5.0] - 2026-10-12
 
 ### Added

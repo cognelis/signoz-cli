@@ -12,7 +12,10 @@ use signoz_client::{
 };
 
 use crate::args::*;
-use crate::config::{ConfigFile, CredentialStore, SystemKeyring, default_config_path};
+use crate::config::{
+    CREDENTIAL_STORE_ENV, ConfigFile, CredentialStore, credential_store_label,
+    credential_store_override, default_config_path, open_credential_store,
+};
 use crate::doctor::DoctorReport;
 use crate::output::Meta;
 
@@ -118,12 +121,13 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     }
     if matches!(&cli.command, Command::Init) {
         let path = config_path()?;
+        let store = credential_store_for(&ConfigFile::load(&path).unwrap_or_default(), &path)?;
         return crate::onboarding::run_init(
             cli.profile.as_deref(),
             cli.url.as_deref(),
             cli.timeout,
             &path,
-            &SystemKeyring,
+            &store,
         )
         .await;
     }
@@ -144,7 +148,19 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     let now = Utc::now();
     let path = config_path()?;
     let mut config = ConfigFile::load(&path).map_err(AppError::config)?;
-    let store = SystemKeyring;
+    // Handled before the current store opens, so an unusable setting can still be changed.
+    if let Command::Config {
+        command:
+            ConfigCommand::Set {
+                key: ConfigKey::CredentialStore,
+                value,
+                migrate,
+            },
+    } = &cli.command
+    {
+        return set_credential_store(*value, *migrate, &mut config, &path);
+    }
+    let store = credential_store_for(&config, &path)?;
     if let Command::Auth {
         command: AuthCommand::Login {
             api_key_stdin,
@@ -330,14 +346,24 @@ async fn run_doctor(cli: &Cli) -> DispatchResult {
     meta.profile = target.profile.clone();
 
     let key = std::env::var("SIGNOZ_API_KEY").ok();
-    let connection = match config.resolve_credentials(target, key.as_deref(), &SystemKeyring) {
-        Ok(connection) => connection,
+    let resolved = config.credential_backend().and_then(|backend| {
+        let store = open_credential_store(backend, &path)?;
+        let source = match key {
+            Some(_) => "SIGNOZ_API_KEY",
+            None => credential_store_label(backend),
+        };
+        config
+            .resolve_credentials(target, key.as_deref(), &store)
+            .map(|connection| (connection, source))
+    });
+    let (connection, source) = match resolved {
+        Ok(resolved) => resolved,
         Err(_) => {
             report.credentials_failed();
             return doctor_result(report, meta, Some(ErrorCode::Config));
         }
     };
-    report.credentials_passed();
+    report.credentials_passed(source);
 
     let client = match SigNozClient::new_with_timeout(
         connection.origin,
@@ -395,6 +421,89 @@ async fn run_doctor(cli: &Cli) -> DispatchResult {
             doctor_result(report, meta, Some(code))
         }
     }
+}
+
+/// The credential store this invocation reads and writes.
+fn credential_store_for(
+    config: &ConfigFile,
+    path: &Path,
+) -> Result<Box<dyn CredentialStore>, AppError> {
+    let backend = config.credential_backend().map_err(AppError::config)?;
+    open_credential_store(backend, path).map_err(AppError::config)
+}
+
+/// Choose where API keys are kept and, with `migrate`, move the stored ones there.
+fn set_credential_store(
+    backend: CredentialBackend,
+    migrate: bool,
+    config: &mut ConfigFile,
+    path: &Path,
+) -> Result<DispatchResult, AppError> {
+    let previous = config.credential_store.unwrap_or_default();
+    let next_store = open_credential_store(backend, path).map_err(AppError::config)?;
+    if backend == CredentialBackend::File && previous != CredentialBackend::File {
+        crate::onboarding::confirm_plaintext_store()?;
+    }
+    // The keychain and `security` read and write the same login keychain entries.
+    let keychain = |backend| {
+        matches!(
+            backend,
+            CredentialBackend::Keychain | CredentialBackend::Security
+        )
+    };
+    let same_entries = backend == previous || (keychain(backend) && keychain(previous));
+    let mut warnings = Vec::new();
+    let mut migration = None;
+    if !same_entries {
+        if migrate {
+            let previous_store = open_credential_store(previous, path).map_err(AppError::config)?;
+            let moved = config
+                .migrate_credentials(&previous_store, &next_store)
+                .map_err(AppError::config)?;
+            migration = Some((moved, previous_store));
+        } else if !config.profiles.is_empty() {
+            warnings.push(format!(
+                "{} profile(s) keep API keys in {}; run again with --migrate to move them, or run auth login again",
+                config.profiles.len(),
+                credential_store_label(previous)
+            ));
+        }
+    }
+    config.credential_store = Some(backend);
+    config.save(path).map_err(AppError::config)?;
+    let mut data = json!({"key": ConfigKey::CredentialStore, "value": backend});
+    if let Some((moved, previous_store)) = migration {
+        // Only now that the config file points at the new store is the old copy removed.
+        for name in &moved.remove_from_previous {
+            if let Err(error) = previous_store.delete(name) {
+                warnings.push(format!(
+                    "could not remove the API key of '{name}' from {}: {error}",
+                    credential_store_label(previous)
+                ));
+            }
+        }
+        data["migration"] = serde_json::to_value(&moved).expect("migration counts serialize");
+    }
+    if backend == CredentialBackend::Security && previous == CredentialBackend::Keychain {
+        warnings.push(
+            "the first read of each existing API key asks once to allow /usr/bin/security; choose Always Allow"
+                .into(),
+        );
+    }
+    if credential_store_override().is_ok_and(|current| current.is_some_and(|env| env != backend)) {
+        warnings.push(format!(
+            "{CREDENTIAL_STORE_ENV} is set and takes precedence over this setting"
+        ));
+    }
+    Ok(DispatchResult {
+        command: "config.set".into(),
+        data,
+        meta: Meta {
+            warnings,
+            ..Meta::default()
+        },
+        failure_code: None,
+    })
 }
 
 fn doctor_result(
@@ -471,6 +580,9 @@ fn prepare(
                 serde_json::to_value(config)
                     .map_err(|error| AppError::config(error.to_string()))?,
             ),
+            ConfigCommand::Set { .. } => {
+                unreachable!("config set is dispatched before command preparation")
+            }
         },
         Command::Skills { .. } => {
             unreachable!("skills are dispatched before command preparation")

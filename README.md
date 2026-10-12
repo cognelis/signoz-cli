@@ -85,7 +85,7 @@ for supported shells and a quick zsh setup example.
 
 ## Authenticate
 
-For a workstation, start the guided setup. It creates or repairs a profile, masks the API key while typing, verifies the connection before saving, stores the key in the operating-system credential store, activates the profile, and installs the bundled Skill for Codex and Claude Code by default.
+For a workstation, start the guided setup. It creates or repairs a profile, masks the API key while typing, verifies the connection before saving, stores the key in the [credential store](#credential-store), activates the profile, and installs the bundled Skill for Codex and Claude Code by default.
 
 ```sh
 signoz-cli init
@@ -102,7 +102,7 @@ export SIGNOZ_API_KEY="...from a secret store..."
 signoz-cli doctor --output json
 ```
 
-For scripts that intentionally persist a profile, profiles store only the instance URL in the operating-system config directory. API keys are verified before they are stored in the operating-system keyring.
+For scripts that intentionally persist a profile, profiles store only the instance URL in the operating-system config directory. API keys are verified before they are stored in the [credential store](#credential-store).
 
 ```sh
 signoz-cli profile add production --url https://your-signoz.example.com --description "Production observability"
@@ -127,7 +127,23 @@ signoz-cli --profile prod doctor --output json
 
 Changing an instance address with `profile update <name> --url <url>` clears its saved API key before saving the new URL. Authenticate again with `signoz-cli --profile <name> auth login`. An equivalent normalized URL preserves the key. If the credential store cannot clear the old key, the URL is not changed.
 
-`profile add` and `profile update` accept `--description` to record what an environment is for; `profile list` and `profile show` return it. A description is trimmed and must be one line of at most 200 characters, `--description ""` clears it, and changing only the description keeps the saved API key. The bundled skill chooses a profile by its name and description: it uses a profile the user names, matches an environment or purpose that the request mentions against `profile list`, asks the user when several profiles or none could match, and uses the default profile only when the request names no environment.
+`profile add` and `profile update` accept `--description` to record what an environment is for; `profile list` and `profile show` return it. A description is trimmed and must be one line of at most 200 characters, `--description ""` clears it, and changing only the description keeps the saved API key. The bundled skill chooses a profile by its name and description: it uses a profile the user names, uses a production profile only when the request names production, matches the request against `profile list`, asks the user when several profiles or none could match one instance, answers a question about a whole environment from each of its profiles, and otherwise keeps the environment already in use or the default profile.
+
+### Credential store
+
+`signoz-cli config set credential-store <store>` chooses where saved API keys live:
+
+| Store | Where keys live | Notes |
+| --- | --- | --- |
+| `keychain` (default) | macOS Keychain, Windows Credential Manager, or the Linux Secret Service | On macOS each key trusts the binary that saved it, so a rebuilt or upgraded binary asks for approval again |
+| `security` (macOS) | The same login keychain, read through `/usr/bin/security` | Each key asks once for that Apple-signed tool; choose Always Allow and upgrades stay quiet |
+| `file` | `credentials.toml` beside the config file, readable only by its owner | Never prompts, but keeps keys in plain text; switching to it needs confirmation in an interactive terminal |
+
+```sh
+signoz-cli config set credential-store security --migrate
+```
+
+`--migrate` copies the keys of existing profiles to the new store and removes them from the old one once the config file is saved; without it, profiles keep their keys in the old store until `auth login` runs again. `SIGNOZ_CLI_CREDENTIAL_STORE` overrides the setting for one shell or CI job, and `doctor` reports where the key came from.
 
 ## Diagnose a connection
 
@@ -154,7 +170,7 @@ signoz-cli --output json metrics query http.server.duration \
 
 # Search logs
 signoz-cli --output json logs search \
-  --since 1h --filter "severity_text = 'ERROR'"
+  --since 1h --filter "severity_text IN ('ERROR', 'error')"
 
 # Find traces for a service
 signoz-cli --output json traces search \

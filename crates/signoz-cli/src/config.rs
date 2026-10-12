@@ -2,9 +2,17 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use clap::ValueEnum;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use signoz_client::{ClientError, Credentials, ErrorCode, SigNozOrigin};
+
+use crate::args::CredentialBackend;
+
+/// `keychain`, `security`, or `file`; overrides the config file's `credential_store` setting.
+pub const CREDENTIAL_STORE_ENV: &str = "SIGNOZ_CLI_CREDENTIAL_STORE";
+/// The keyring service that names every stored API key.
+const SERVICE: &str = "signoz-cli";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfileConfig {
@@ -18,6 +26,9 @@ pub struct ProfileConfig {
 pub struct ConfigFile {
     #[serde(default)]
     pub current_profile: Option<String>,
+    /// Where API keys are kept; the keychain when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_store: Option<CredentialBackend>,
     #[serde(default)]
     pub profiles: BTreeMap<String, ProfileConfig>,
 }
@@ -28,11 +39,26 @@ pub trait CredentialStore {
     fn delete(&self, name: &str) -> Result<(), String>;
 }
 
+impl<T: CredentialStore + ?Sized> CredentialStore for Box<T> {
+    fn get(&self, name: &str) -> Result<Option<String>, String> {
+        (**self).get(name)
+    }
+
+    fn set(&self, name: &str, value: &str) -> Result<(), String> {
+        (**self).set(name, value)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        (**self).delete(name)
+    }
+}
+
+/// The operating-system keyring. On macOS each CLI build is approved separately.
 pub struct SystemKeyring;
 
 impl CredentialStore for SystemKeyring {
     fn get(&self, name: &str) -> Result<Option<String>, String> {
-        match keyring::Entry::new("signoz-cli", name)
+        match keyring::Entry::new(SERVICE, name)
             .map_err(|error| error.to_string())?
             .get_password()
         {
@@ -43,19 +69,242 @@ impl CredentialStore for SystemKeyring {
     }
 
     fn set(&self, name: &str, value: &str) -> Result<(), String> {
-        keyring::Entry::new("signoz-cli", name)
+        keyring::Entry::new(SERVICE, name)
             .map_err(|error| error.to_string())?
             .set_password(value)
             .map_err(|error| error.to_string())
     }
 
     fn delete(&self, name: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new("signoz-cli", name).map_err(|error| error.to_string())?;
+        let entry = keyring::Entry::new(SERVICE, name).map_err(|error| error.to_string())?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.to_string()),
         }
     }
+}
+
+/// macOS `/usr/bin/security`: the same login keychain entries as [`SystemKeyring`], approved once
+/// for that Apple-signed tool instead of for every CLI build.
+pub struct SecurityCli;
+
+/// The exit status `security` returns for an entry that does not exist.
+const SECURITY_NOT_FOUND: i32 = 44;
+
+impl SecurityCli {
+    fn run(arguments: &[&str], input: Option<&str>) -> Result<std::process::Output, String> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("/usr/bin/security")
+            .args(arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("cannot run /usr/bin/security: {error}"))?;
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        if let Some(input) = input {
+            // A failed write surfaces as the command's own failure.
+            let _ = stdin.write_all(input.as_bytes());
+        }
+        drop(stdin);
+        child
+            .wait_with_output()
+            .map_err(|error| format!("cannot run /usr/bin/security: {error}"))
+    }
+
+    fn failure(action: &str, output: &std::process::Output) -> String {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let detail = if detail.is_empty() {
+            format!("exit status {:?}", output.status.code())
+        } else {
+            detail
+        };
+        format!("the macOS keychain could not {action} the API key: {detail}")
+    }
+}
+
+impl CredentialStore for SecurityCli {
+    fn get(&self, name: &str) -> Result<Option<String>, String> {
+        let output = Self::run(
+            &["find-generic-password", "-s", SERVICE, "-a", name, "-w"],
+            None,
+        )?;
+        match output.status.code() {
+            Some(0) => {
+                let value = String::from_utf8(output.stdout)
+                    .map_err(|_| "the stored API key is not valid UTF-8".to_owned())?;
+                let value = value.strip_suffix('\n').unwrap_or(&value);
+                Ok((!value.is_empty()).then(|| value.to_owned()))
+            }
+            Some(SECURITY_NOT_FOUND) => Ok(None),
+            _ => Err(Self::failure("read", &output)),
+        }
+    }
+
+    fn set(&self, name: &str, value: &str) -> Result<(), String> {
+        if value.contains(['\n', '\r']) {
+            return Err("API keys must not contain line breaks".into());
+        }
+        // `-w` without a value reads the secret twice from stdin, keeping it out of the process list.
+        let output = Self::run(
+            &[
+                "add-generic-password",
+                "-U",
+                "-s",
+                SERVICE,
+                "-a",
+                name,
+                "-w",
+            ],
+            Some(&format!("{value}\n{value}\n")),
+        )?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(Self::failure("store", &output))
+        }
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        let output = Self::run(
+            &["delete-generic-password", "-s", SERVICE, "-a", name],
+            None,
+        )?;
+        match output.status.code() {
+            Some(0 | SECURITY_NOT_FOUND) => Ok(()),
+            _ => Err(Self::failure("remove", &output)),
+        }
+    }
+}
+
+/// API keys in `credentials.toml` beside the config file, readable only by its owner. Nothing
+/// ever prompts, but the values are stored in plain text.
+pub struct FileStore {
+    path: PathBuf,
+}
+
+impl FileStore {
+    pub fn beside(config_path: &Path) -> Self {
+        Self {
+            path: config_path.with_file_name("credentials.toml"),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn read(&self) -> Result<BTreeMap<String, String>, String> {
+        match fs::read_to_string(&self.path) {
+            Ok(text) => toml::from_str(&text).map_err(|error| {
+                format!("invalid credentials file {}: {error}", self.path.display())
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+            Err(error) => Err(format!("cannot read {}: {error}", self.path.display())),
+        }
+    }
+
+    fn write(&self, credentials: &BTreeMap<String, String>) -> Result<(), String> {
+        use std::io::Write;
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let text = toml::to_string(credentials).map_err(|error| error.to_string())?;
+        let temporary = self
+            .path
+            .with_extension(format!("tmp-{}", std::process::id()));
+        let _ = fs::remove_file(&temporary);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let written = options
+            .open(&temporary)
+            .and_then(|mut file| file.write_all(text.as_bytes()))
+            .and_then(|()| fs::rename(&temporary, &self.path));
+        written.map_err(|error| {
+            let _ = fs::remove_file(&temporary);
+            format!("cannot write {}: {error}", self.path.display())
+        })
+    }
+}
+
+impl CredentialStore for FileStore {
+    fn get(&self, name: &str) -> Result<Option<String>, String> {
+        Ok(self.read()?.remove(name))
+    }
+
+    fn set(&self, name: &str, value: &str) -> Result<(), String> {
+        let mut credentials = self.read()?;
+        credentials.insert(name.to_owned(), value.to_owned());
+        self.write(&credentials)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        let mut credentials = self.read()?;
+        if credentials.remove(name).is_some() {
+            self.write(&credentials)?;
+        }
+        Ok(())
+    }
+}
+
+/// `SIGNOZ_CLI_CREDENTIAL_STORE`, if set; it takes precedence over the config file.
+pub fn credential_store_override() -> Result<Option<CredentialBackend>, String> {
+    parse_credential_store(
+        std::env::var(CREDENTIAL_STORE_ENV)
+            .ok()
+            .filter(|value| !value.is_empty())
+            .as_deref(),
+    )
+}
+
+fn parse_credential_store(value: Option<&str>) -> Result<Option<CredentialBackend>, String> {
+    value
+        .map(|value| {
+            CredentialBackend::from_str(value, true).map_err(|_| {
+                format!("{CREDENTIAL_STORE_ENV} must be keychain, security, or file, not '{value}'")
+            })
+        })
+        .transpose()
+}
+
+/// Open a credential store; `security` exists only on macOS.
+pub fn open_credential_store(
+    backend: CredentialBackend,
+    config_path: &Path,
+) -> Result<Box<dyn CredentialStore>, String> {
+    match backend {
+        CredentialBackend::Keychain => Ok(Box::new(SystemKeyring)),
+        CredentialBackend::Security if cfg!(target_os = "macos") => Ok(Box::new(SecurityCli)),
+        CredentialBackend::Security => {
+            Err("the security credential store is available only on macOS".into())
+        }
+        CredentialBackend::File => Ok(Box::new(FileStore::beside(config_path))),
+    }
+}
+
+/// Where a backend keeps API keys, as shown to people.
+pub fn credential_store_label(backend: CredentialBackend) -> &'static str {
+    match backend {
+        CredentialBackend::Keychain => "the operating-system keychain",
+        CredentialBackend::Security => "the macOS keychain through /usr/bin/security",
+        CredentialBackend::File => "the credentials file",
+    }
+}
+
+/// What moving API keys to another store did.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Migration {
+    /// API keys copied to the new store.
+    pub moved: usize,
+    /// Profiles whose API key the previous store did not hold.
+    pub missing: usize,
+    /// Entries to remove from the previous store once the config file is saved.
+    #[serde(skip)]
+    pub remove_from_previous: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -163,6 +412,46 @@ impl ConfigFile {
             }
         }
         Ok(())
+    }
+
+    /// `SIGNOZ_CLI_CREDENTIAL_STORE`, then the config file, then the keychain.
+    pub fn credential_backend(&self) -> Result<CredentialBackend, String> {
+        Ok(credential_store_override()?
+            .or(self.credential_store)
+            .unwrap_or_default())
+    }
+
+    /// Copy every profile's API key from `from` to `to`. Nothing is removed here: the caller saves
+    /// the config file, then removes [`Migration::remove_from_previous`], so a failure leaves the
+    /// previous store intact.
+    pub fn migrate_credentials(
+        &self,
+        from: &dyn CredentialStore,
+        to: &dyn CredentialStore,
+    ) -> Result<Migration, String> {
+        let mut migration = Migration::default();
+        let mut copies = Vec::new();
+        for name in self.profiles.keys() {
+            match from.get(name)? {
+                Some(key) => copies.push((name.as_str(), key)),
+                None => migration.missing += 1,
+            }
+        }
+        let mut written: Vec<&str> = Vec::new();
+        for (name, key) in &copies {
+            if let Err(error) = to.set(name, key) {
+                for name in &written {
+                    let _ = to.delete(name);
+                }
+                return Err(format!(
+                    "could not copy the API key of '{name}' to the new store, so nothing was moved: {error}"
+                ));
+            }
+            written.push(name);
+        }
+        migration.moved = written.len();
+        migration.remove_from_previous = written.into_iter().map(str::to_owned).collect();
+        Ok(migration)
     }
 
     pub fn use_profile(&mut self, name: &str) -> Result<(), String> {
@@ -663,5 +952,88 @@ mod tests {
             "https://explicit.signoz.example.com"
         );
         assert_eq!(resolved.profile, None);
+    }
+
+    #[test]
+    fn file_store_keeps_api_keys_readable_only_by_their_owner() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = FileStore::beside(&directory.path().join("config.toml"));
+        assert_eq!(store.get("prod").unwrap(), None);
+        store.set("prod", "prod-key").unwrap();
+        store.set("test", "test-key").unwrap();
+        assert_eq!(store.get("prod").unwrap().as_deref(), Some("prod-key"));
+        store.delete("prod").unwrap();
+        assert_eq!(store.get("prod").unwrap(), None);
+        assert_eq!(store.get("test").unwrap().as_deref(), Some("test-key"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(store.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn credential_store_settings_parse_and_default_to_the_keychain() {
+        assert_eq!(parse_credential_store(None), Ok(None));
+        assert_eq!(
+            parse_credential_store(Some("security")),
+            Ok(Some(CredentialBackend::Security))
+        );
+        assert_eq!(
+            parse_credential_store(Some("FILE")),
+            Ok(Some(CredentialBackend::File))
+        );
+        assert!(
+            parse_credential_store(Some("vault"))
+                .unwrap_err()
+                .contains(CREDENTIAL_STORE_ENV)
+        );
+        assert_eq!(
+            ConfigFile::default().credential_store.unwrap_or_default(),
+            CredentialBackend::Keychain
+        );
+    }
+
+    #[test]
+    fn migration_copies_api_keys_and_undoes_a_failed_copy() {
+        let mut config = ConfigFile::default();
+        for name in ["prod", "stale", "test"] {
+            config
+                .add_profile(name, "https://signoz.example.com")
+                .unwrap();
+        }
+        let from = MemoryStore::default();
+        from.set("prod", "prod-key").unwrap();
+        from.set("test", "test-key").unwrap();
+        let to = MemoryStore::default();
+        let migration = config.migrate_credentials(&from, &to).unwrap();
+        assert_eq!((migration.moved, migration.missing), (2, 1));
+        assert_eq!(migration.remove_from_previous, ["prod", "test"]);
+        assert_eq!(to.get("test").unwrap().as_deref(), Some("test-key"));
+        // The caller removes the old copies only after saving the config file.
+        assert_eq!(from.get("prod").unwrap().as_deref(), Some("prod-key"));
+
+        /// Accepts the first write and refuses the rest.
+        struct FlakyStore(MemoryStore, Mutex<bool>);
+        impl CredentialStore for FlakyStore {
+            fn get(&self, name: &str) -> Result<Option<String>, String> {
+                self.0.get(name)
+            }
+            fn set(&self, name: &str, value: &str) -> Result<(), String> {
+                let mut used = self.1.lock().unwrap();
+                if std::mem::replace(&mut *used, true) {
+                    return Err("disk full".into());
+                }
+                self.0.set(name, value)
+            }
+            fn delete(&self, name: &str) -> Result<(), String> {
+                self.0.delete(name)
+            }
+        }
+        let flaky = FlakyStore(MemoryStore::default(), Mutex::new(false));
+        let error = config.migrate_credentials(&from, &flaky).unwrap_err();
+        assert!(error.contains("nothing was moved"), "{error}");
+        assert_eq!(flaky.get("prod").unwrap(), None);
     }
 }

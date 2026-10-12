@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Parser)]
 #[command(
@@ -250,6 +251,36 @@ pub enum ConfigCommand {
     ///
     /// Show the configuration with credentials omitted.
     Show,
+    /// Change a configuration setting.
+    ///
+    /// `credential-store keychain|security|file` chooses where API keys are kept; SIGNOZ_CLI_CREDENTIAL_STORE overrides it.
+    Set {
+        key: ConfigKey,
+        value: CredentialBackend,
+        /// Move stored API keys to the new store.
+        #[arg(long)]
+        migrate: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfigKey {
+    /// Where API keys are kept.
+    CredentialStore,
+}
+
+/// Where API keys are kept.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum CredentialBackend {
+    /// The operating-system keyring, approved per CLI build.
+    #[default]
+    Keychain,
+    /// macOS `/usr/bin/security`; the same login keychain items, approved once for that tool.
+    Security,
+    /// A file beside the config file, readable only by its owner.
+    File,
 }
 
 #[derive(Clone, Debug, Subcommand)]

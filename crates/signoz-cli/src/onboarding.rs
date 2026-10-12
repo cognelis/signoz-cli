@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Serialize;
 use serde_json::{Value, json};
-use signoz_client::{Credentials, Operation, SigNozClient, SigNozOrigin};
+use signoz_client::{Credentials, ErrorCode, Operation, SigNozClient, SigNozOrigin};
 
 use crate::args::{OutputFormat, SkillTarget};
 use crate::config::{ConfigFile, CredentialStore, validate_profile_name};
@@ -160,7 +160,7 @@ pub async fn run_init(
     persist_setup(&mut config, config_path, store, &draft)?;
     let mut doctor = DoctorReport::new(env!("CARGO_PKG_VERSION"));
     doctor.configuration_passed();
-    doctor.credentials_passed();
+    doctor.credentials_passed("the API key you entered");
     doctor.api_passed();
     doctor.authentication_passed();
     prompt_io(cliclack::outro(format!(
@@ -494,6 +494,31 @@ fn persist_setup(
         }));
     }
     Ok(())
+}
+
+/// Only a person in an interactive terminal may move API keys into a plain-text file.
+pub fn confirm_plaintext_store() -> Result<(), AppError> {
+    if !interactive_terminal() {
+        return Err(AppError {
+            code: ErrorCode::Forbidden,
+            message: "keeping API keys in a plain-text file requires confirmation in an interactive terminal".into(),
+            status: None,
+            hint: None,
+        }
+        .with_hint(
+            "ask the user to run `signoz-cli config set credential-store file` in their own terminal",
+        ));
+    }
+    let confirmed = prompt_io(
+        cliclack::confirm("Keep API keys in a plain-text file only you can read?")
+            .initial_value(false)
+            .interact(),
+    )?;
+    if confirmed {
+        Ok(())
+    } else {
+        Err(AppError::validation("credential store change cancelled"))
+    }
 }
 
 fn interactive_terminal() -> bool {

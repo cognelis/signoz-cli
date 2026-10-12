@@ -74,8 +74,13 @@ impl DoctorReport {
         );
     }
 
-    pub fn credentials_passed(&mut self) {
-        self.set(CREDENTIALS, DoctorStatus::Pass, "an API key is available");
+    /// `source` names where the API key came from, such as the credential store.
+    pub fn credentials_passed(&mut self, source: &str) {
+        self.set(
+            CREDENTIALS,
+            DoctorStatus::Pass,
+            format!("an API key is available from {source}"),
+        );
     }
 
     pub fn credentials_failed(&mut self) {
