@@ -162,6 +162,10 @@ For `logs aggregate` and `traces aggregate`, use one of the advertised aggregati
 
 Use `fields keys|values` with `--search`, `--context`, `--type`, `--metric-name`, `--metric-namespace`, `--source meter`, and a time window to discover valid query fields. A response with `meta.hasMore: true` is incomplete; narrow these filters because the fields APIs do not expose offset pagination.
 
+`alerts list` returns the alert instances Alertmanager holds now (firing, silenced, or inhibited), not rule definitions or past alerts. To answer whether anything alerted recently, run `alerts list`, then `rules list`, and for each rule `rules history-stats <id> --since <window>` (a summary of its firings) or `rules history <id> --since <window>` (its state changes). With no rules nothing can alert; say so instead of reporting that all is well.
+
+`services list` is built from traces: a service that sends only logs or metrics does not appear, so check `logs aggregate --group-by service.name` for those.
+
 `services dependencies`, the exception commands, and Explorer `views` are first-party UI/MCP compatibility adapters rather than published stable SigNoz APIs. If the server returns exit code 7, report the capability as unsupported; do not retry another guessed route. Public v2/v5 routes back dashboards, metrics, Query Builder, rule history, and infrastructure.
 
 Example:
