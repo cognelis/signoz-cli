@@ -134,7 +134,7 @@ pub enum Command {
         #[command(subcommand)]
         command: MetersCommand,
     },
-    /// List alerts.
+    /// List current alerts.
     Alerts {
         #[command(subcommand)]
         command: AlertsCommand,
@@ -876,7 +876,9 @@ pub enum MetersCommand {
 
 #[derive(Clone, Debug, Subcommand)]
 pub enum AlertsCommand {
-    /// List alerts.
+    /// List current alerts.
+    ///
+    /// Return the alert instances Alertmanager holds now: firing, silenced, or inhibited. Rule definitions are under `rules list`, and past firings under `rules history`.
     List {
         #[command(flatten)]
         page: PaginationArgs,

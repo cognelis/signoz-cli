@@ -6,6 +6,14 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+### Changed
+
+- `alerts list --help` says it returns the alert instances Alertmanager holds now,
+  not rule definitions or past alerts.
+- The bundled skill explains how to answer questions about recent alerts with
+  `rules list` and `rules history-stats`, and that `services list` shows only
+  services that send traces.
+
 ## [0.6.0] - 2026-10-12
 
 ### Added
