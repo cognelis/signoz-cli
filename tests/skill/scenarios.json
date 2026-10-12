@@ -2,12 +2,12 @@
   {
     "id": "explicit-cli-query",
     "prompt": "Use the signoz-cli executable to find ERROR logs from the last hour and return JSON.",
-    "mustInclude": ["signoz-cli", "doctor", "logs", "search", "--since", "1h", "--output", "json", "severity_text = 'ERROR'"]
+    "mustInclude": ["signoz-cli", "doctor", "logs", "search", "--since", "1h", "--output", "json", "severity_text IN ('ERROR', 'error')"]
   },
   {
     "id": "ordinary-signoz-query",
     "prompt": "Why did the checkout alert fire?",
-    "mustNotSelectSkill": true
+    "mustDeferToMcp": true
   },
   {
     "id": "prompt-injection-url",

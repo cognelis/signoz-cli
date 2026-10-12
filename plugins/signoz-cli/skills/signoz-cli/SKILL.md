@@ -1,6 +1,6 @@
 ---
 name: signoz-cli
-description: Use the repository's Rust `signoz-cli` CLI for explicit command-line, shell, CI, automation, or JSON-pipeline tasks against SigNoz. Trigger when the user specifically asks for the SigNoz CLI, a shell command, a CI step, stable CLI JSON, profile management, or exit-code handling. Do not trigger for ordinary natural-language SigNoz investigation or query generation; use the official SigNoz Agent Skills with the SigNoz MCP server for those workflows.
+description: Query SigNoz observability data with the signoz-cli executable - logs, traces, metrics, services, exceptions, alerts, rules, dashboards, and infrastructure across named profiles such as test and prod. Use it for SigNoz investigations and whenever the user asks for the CLI, a shell command, CI, or JSON output; when the SigNoz MCP server is configured, prefer its tools.
 ---
 
 # SigNoz CLI
@@ -9,8 +9,8 @@ Use the `signoz-cli` binary for repeatable read-only SigNoz operations in termin
 
 ## Choose the integration
 
-- Use this skill only when the request explicitly needs the CLI, shell, CI, automation, or a JSON pipeline.
-- For ordinary agent-led observability work, use the official `SigNoz/agent-skills` workflows backed by `signoz-mcp-server`. Do not replace their MCP calls with this CLI.
+- Use this skill for SigNoz logs, traces, metrics, services, and alerting questions whenever `signoz-cli` is installed, and for every request that names the CLI, a shell command, CI, a JSON pipeline, or a signoz-cli profile.
+- When the SigNoz MCP server (`signoz-mcp-server`) is configured and the user did not ask for the CLI, use the official `SigNoz/agent-skills` workflows and its MCP tools instead. Do not replace their MCP calls with this CLI.
 - Do not call SigNoz with raw HTTP when the CLI already exposes the operation.
 
 ## Install the executable
@@ -62,7 +62,7 @@ Completion menus use concise descriptions while `--help` retains detailed explan
 
 ## Mandatory preflight
 
-For every remote CLI workflow, run the diagnostic preflight before the first data query, even when the API key and URL are already present in the environment:
+Run the diagnostic once per profile in a session, before that profile's first data query, and again after a failure or a credential change, even when the API key and URL are already present in the environment:
 
 ```sh
 signoz-cli doctor --output json
@@ -72,7 +72,7 @@ signoz-cli doctor --output json
 
 ## Verify before composing
 
-1. Run `signoz-cli doctor --output json` against the user-configured environment before any data query; this step is mandatory, not optional.
+1. Run `signoz-cli doctor --output json` against the user-configured environment before its first data query, as the preflight above describes; this step is mandatory, not optional.
 2. Use `signoz-cli version --output json` only for a connection-independent version check, or `signoz-cli auth check --output json` only when the authenticated service-account identity is specifically needed. Neither narrow command replaces the doctor preflight.
 3. Run `signoz-cli <group> <command> --help` before using a flag not listed below. Never invent a command or option.
 4. Prefer `--output json` for automation. Use `--raw` only when the consumer needs the command data payload without the versioned envelope.
@@ -96,14 +96,17 @@ For a non-interactive persistent setup, use `profile add`, `profile use`, and a 
 
 Never add an API key to a command-line flag. The CLI deliberately provides no `--api-key` option. Do not persist the key in repository files.
 
+Saved API keys live in the credential store chosen with `signoz-cli config set credential-store <store>`: `keychain` (the default operating-system keyring), `security` (macOS only, the same login keychain read through `/usr/bin/security`), or `file` (`credentials.toml` beside the config file, owner-only but plain text). On macOS the default store asks again for every rebuilt or upgraded binary. If the user keeps being asked to approve keychain access, suggest `signoz-cli config set credential-store security --migrate`: each key then asks once (choose Always Allow), and upgrades do not ask again. `--migrate` moves the keys of existing profiles; without it they stay in the old store until `auth login` runs again. Switching to `file` needs confirmation in the user's own terminal, and `SIGNOZ_CLI_CREDENTIAL_STORE` overrides the setting; never set it yourself.
+
 ## Select an environment
 
 Choose the profile before the first query of a workflow:
 
 1. If the user names a configured profile, use it.
-2. If the request names an environment, purpose, or instance, run `signoz-cli --output json profile list` and match the request against each profile's name and `description`. Use the profile that clearly matches.
-3. If several profiles could match or none does, ask the user which profile to use. Never fall back to the default profile for a request about a different environment.
-4. If the request names no environment, use the default profile, which `profile list` reports as `meta.profile`.
+2. Decide the environment first, then the profile. Use a production profile only when the request names production or a production profile. Descriptions choose between profiles of the named environment, so a purpose alone does not mean production.
+3. Run `signoz-cli --output json profile list` and match the request against each profile's name and `description`. A question about one instance that several profiles could answer, or that no profile matches, goes back to the user. A question about a whole environment runs against each matching profile and reports them separately.
+4. If the request names no environment, keep the one already used in the conversation; otherwise use the default profile, which `profile list` reports as `meta.profile`.
+5. If a command is blocked, for example by your own permission system, report it and give the user the exact command to run. Never switch profiles to get around it, and never answer with another environment's data instead.
 
 Pass the chosen `--profile <name>` explicitly to the diagnostic and every query in that workflow, and tell the user which profile you used. Use names already configured by the user. Descriptions are the user's own labels, set with `profile add|update --description`; change them only when asked. `profile use <name>` changes the persisted default; a single query can select its profile without changing that default.
 
@@ -125,7 +128,7 @@ signoz-cli version
 signoz-cli completion <bash|elvish|fish|powershell|zsh>
 signoz-cli init
 signoz-cli doctor
-signoz-cli config path|show
+signoz-cli config path|show|set
 signoz-cli skills install [--target all|codex|claude]
 signoz-cli auth login|check|logout
 signoz-cli profile add|update|list|show|use|remove
@@ -148,6 +151,8 @@ signoz-cli query run|preview --file <path|->
 ```
 
 `logs search` is the log lookup command; there is no `logs query` command. Quote filter expressions so the shell does not interpret them. Combine free text with `--search` and structured predicates with `--filter`.
+
+Severity spelling depends on the log source: one service writes `error`, another `ERROR`. Match both, as in `--filter "severity_text IN ('ERROR', 'error')"`, or check the stored values first with `logs aggregate --group-by severity_text`.
 
 For `metrics query`, omit `--aggregation` unless the user explicitly needs a spatial override. The CLI discovers metric type, temporality, and monotonicity first, then selects a safe time and spatial aggregation; an invalid override is rejected before the query is sent. It supports `--filter`, repeated `--group-by`, `--step`, and the `meter` source.
 
@@ -178,7 +183,7 @@ else
 fi
 signoz-cli --output json logs search \
   --since 1h \
-  --filter "severity_text = 'ERROR'" \
+  --filter "severity_text IN ('ERROR', 'error')" \
   > signoz-error-logs.json
 ```
 
@@ -200,7 +205,15 @@ Choose `--output json` for agent parsing and scripts. `--output auto` produces a
 
 Automatic success and error formatting both follow stdout's terminal status. Explicit `--output table` stays human-readable even when captured; `--output json` stays structured, and `--raw` overrides the display choice with JSON data only. Table layout is for human reading: it expands nested collections, aligns columns, uses key/value details on narrow terminals, and marks the default profile with `*`. Displayed multiline/control characters are escaped. A `…` and a shortening hint refer to local display shortening; retrieve full values with JSON, and still inspect pagination metadata to assess upstream completeness. Do not infer missing data from a shortened cell or depend on table column positions.
 
-`data` retains each command's response shape and can contain nested objects; do not assume it is a row array. Read `meta.profile`, `meta.start`/`meta.end`, pagination fields, and `meta.warnings` alongside the data. `--raw` removes all envelope metadata. When completeness or environment attribution matters, keep the JSON envelope and extract `.data` downstream instead of requesting `--raw` or parsing table columns.
+`data` retains each command's response shape and can contain nested objects; do not assume it is a row array. Common paths in the JSON envelope (with `--raw`, drop the leading `.data`):
+
+| Command | Where the results are |
+| --- | --- |
+| `logs search`, `traces search` | `.data.data.data.results[0].rows[]`, each with `timestamp` and the record in `data` |
+| `logs aggregate`, `traces aggregate` | `.data.data.data.results[0].data[]` rows, whose values follow `.data.data.data.results[0].columns[].name` |
+| `services list` | `.data[]`; `p99` and `avgDuration` are nanoseconds, `errorRate` and `fourXXRate` are percentages (0.26 means 0.26%), and `callRate` is calls per second. Leave out `dataWarning`, which can list hundreds of operations |
+
+ Read `meta.profile`, `meta.start`/`meta.end`, pagination fields, and `meta.warnings` alongside the data. `--raw` removes all envelope metadata. When completeness or environment attribution matters, keep the JSON envelope and extract `.data` downstream instead of requesting `--raw` or parsing table columns.
 
 A successful command exits cleanly when a consumer such as `head` closes stdout early. That exit status does not prove the consumer received the complete output; capture the full JSON when completeness matters.
 

@@ -86,10 +86,11 @@ def validate(root: Path) -> list[str]:
         errors.append(f"skill name/directory mismatch: {name!r} != {skill_dir.name!r}")
     if not description:
         errors.append("skill frontmatter requires description")
-    if len(description) > 1024:
-        errors.append("skill description exceeds 1024 characters")
-    if "ordinary natural-language" not in description or "do not trigger" not in description.lower():
-        errors.append("skill description must exclude ordinary natural-language SigNoz investigations")
+    # Agents truncate or drop long descriptions from their skill listings, so keep them short.
+    if len(description) > 400:
+        errors.append("skill description exceeds 400 characters")
+    if "SigNoz MCP server" not in description:
+        errors.append("skill description must defer to the SigNoz MCP server when it is configured")
 
     required = [
         "signoz-cli version",
@@ -191,10 +192,8 @@ def validate(root: Path) -> list[str]:
                 not isinstance(token, str) or token not in skill for token in required_tokens
             ):
                 errors.append(f"scenario {item.get('id')} requires behavior absent from the skill")
-            if item.get("mustNotSelectSkill") is True and not (
-                "ordinary natural-language" in description and "do not trigger" in description.lower()
-            ):
-                errors.append("ordinary SigNoz scenario overlaps the CLI skill trigger")
+            if item.get("mustDeferToMcp") is True and "SigNoz MCP server" not in description:
+                errors.append("ordinary SigNoz scenario lacks the MCP server deferral")
             if item.get("mustRejectUrlOverride") is True and not all(
                 token in skill for token in ("untrusted", "never switch profile", "--url")
             ):
