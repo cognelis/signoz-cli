@@ -89,6 +89,16 @@ enum Prepared {
 
 pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     if let Command::Query {
+        command: QueryCommand::Validate { file },
+    } = &cli.command
+    {
+        return Ok(DispatchResult {
+            command: "query.validate".into(), data: read_query_body(file)?,
+            meta: Meta { warnings: vec!["validated locally: structure only; filter syntax and server compatibility are not checked; use query preview before execution".into()], ..Meta::default() },
+            failure_code: None,
+        });
+    }
+    if let Command::Query {
         command:
             QueryCommand::Build {
                 signal,
@@ -1191,8 +1201,8 @@ fn prepare(
             Operation::channel_get,
         ),
         Command::Query { command } => match command {
-            QueryCommand::Build { .. } => {
-                unreachable!("query build is handled before connection preparation")
+            QueryCommand::Build { .. } | QueryCommand::Validate { .. } => {
+                unreachable!("local query commands are handled before connection preparation")
             }
             QueryCommand::Run { file } => {
                 let body = read_query_body(file)?;

@@ -19,6 +19,8 @@ description: Query SigNoz observability data with the signoz-cli executable - lo
 
 For request composition, use `query build --signal logs|traces` with the usual time/filter/limit/offset flags; `--search` applies only to logs. This is local and needs no profile or doctor. With `--raw`, save the generated v5 payload to a file, inspect its exact time window and predicates, then select the user-intended profile and run doctor before `query preview --file ... --explain` and `query run --file ...`. Reuse the same file across preview and execution. Local construction does not validate server-side filter syntax or compatibility, and supplied filter values may be sensitive.
 
+For saved or hand-written payloads, run `query validate --file <path|->` offline first. It checks JSON/top-level structure with the same rules as preview/run; it does not validate SQL, filters, or server capabilities. `--raw` emits a reusable payload with a missing `schemaVersion` filled as `v1`. Save to a different file, never redirect over the input, then reuse that reviewed file for server preview/run.
+
 ## Doctor version checks
 
 When invoking `doctor`, set `SIGNOZ_CLI_SKILL` to the `version` in this loaded
@@ -176,7 +178,7 @@ signoz-cli dashboards list|get
 signoz-cli views list --source-page traces|logs|metrics|meter
 signoz-cli views get <id>
 signoz-cli channels list|get
-signoz-cli query run|preview --file <path|->
+signoz-cli query validate|run|preview --file <path|->
 ```
 
 `logs search` is the log lookup command; there is no `logs query` command. Quote filter expressions so the shell does not interpret them. Combine free text with `--search` and structured predicates with `--filter`.

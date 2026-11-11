@@ -8,6 +8,10 @@ baselines, not evidence of a published release.
 
 ### Added
 
+- `query validate --file <path|->` checks Query Builder v5 structure offline,
+  using the same validation as preview/run, and prints the normalized payload.
+  Missing `schemaVersion` becomes `v1`; input files are never rewritten.
+
 - `query build --signal logs|traces` builds a local Query Builder v5 search
   payload using the same builders as execution. Time windows are resolved once;
   `--raw` output can be saved and passed to `query preview` or `query run`.

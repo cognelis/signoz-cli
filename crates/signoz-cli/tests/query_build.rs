@@ -92,6 +92,19 @@ async fn built_payload_can_be_reviewed_and_then_submitted_without_rebuilding_it(
     );
     let file = root.path().join("request.json");
     std::fs::write(&file, output.stdout).unwrap();
+    let validated = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args(["--raw", "query", "validate", "--file"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(validated.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&validated.stdout).unwrap(),
+        body
+    );
+    std::fs::write(&file, validated.stdout).unwrap();
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v5/query_range"))
@@ -117,4 +130,54 @@ async fn built_payload_can_be_reviewed_and_then_submitted_without_rebuilding_it(
         .assert()
         .success()
         .stdout(predicate::str::contains("query.run"));
+}
+
+#[test]
+fn validates_saved_queries_offline_and_emits_normalized_payloads() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("broken.toml");
+    std::fs::write(&config, "invalid = [").unwrap();
+    let body = json!({"start": 1000, "end": 2000, "requestType": "raw",
+        "compositeQuery": {"queries": [{"type": "builder_query", "spec": {"signal": "logs"}}]}});
+    let file = root.path().join("query.json");
+    std::fs::write(&file, body.to_string()).unwrap();
+    let output = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args(["--raw", "query", "validate", "--file"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let normalized: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(normalized["schemaVersion"], "v1");
+    let mut expected = body.clone();
+    expected["schemaVersion"] = json!("v1");
+    assert_eq!(normalized, expected);
+    assert_eq!(
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap(),
+        body
+    );
+    Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args(["--output", "json", "query", "validate", "--file", "-"])
+        .write_stdin(normalized.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("query.validate"));
+    for invalid in ["{", "[]", r#"{"start":2,"end":1}"#] {
+        Command::cargo_bin("signoz-cli")
+            .unwrap()
+            .env("SIGNOZ_CONFIG", &config)
+            .args(["query", "validate"])
+            .write_stdin(invalid)
+            .assert()
+            .code(2)
+            .stdout("");
+    }
 }

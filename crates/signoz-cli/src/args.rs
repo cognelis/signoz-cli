@@ -1088,6 +1088,14 @@ pub enum QueryCommand {
         #[command(flatten)]
         page: PaginationArgs,
     },
+    /// Validate query structure locally.
+    ///
+    /// Print the normalized payload without connecting.
+    Validate {
+        /// Read query JSON from a file or stdin (-).
+        #[arg(long, default_value = "-", value_hint = clap::ValueHint::FilePath)]
+        file: PathBuf,
+    },
     /// Run a query payload.
     Run {
         /// Read query JSON from a file or stdin (-).

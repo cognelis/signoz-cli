@@ -153,3 +153,11 @@ Skill 增加任务分流：本地维护直接使用离线命令，数据任务�
 
 第九轮验收：163 项 Rust 测试、9 项 Node 安装测试、13 项 Python 测试、fmt/clippy、Agent 集成及发布检查通过；工作区 release 二进制的 npm tarball 安装测试覆盖 query build。固定时间查询在本地模拟服务中原样提交验证通过。
 本轮未执行全局重装或插件刷新；草稿使用工作区构建试用。未验证生产服务、其他操作系统或模型级 Skill 效果。
+
+## 第十轮 RSI：请求复用与命令发现
+
+新增 query validate，让手写/保存的 Query Builder v5 文件在无配置环境也能检查结构。复用 preview/run 的读取与校验逻辑，输出规范化 payload，不改写输入。回归覆盖坏配置、文件/stdin、缺省 schemaVersion、非法 JSON/时间以及 validate 后原样发送。
+
+验收：164 项 Rust 测试、9 项 Node 安装测试、13 项 Python 测试、fmt/clippy、Agent 集成、版本检查及工作区 release 二进制 npm tarball 冒烟通过。完整回归曾发现新增补全菜单文案过长，缩短菜单标题并保留长帮助后通过。
+
+本轮新增能力的用例均先在原实现确认失败，再完成实现与验证。保持 Unreleased，不递增版本，不刷新全局安装或插件。通用 Skill 校验器不接受项目既有的 version frontmatter 字段；保留 doctor 需要的字段，并使用仓库的 Skill/发布校验。未验证生产服务、其他操作系统及模型级 Skill 效果。

@@ -61,6 +61,10 @@ async function main() {
     assert.equal(built.data.start, 1000);
     assert.equal(built.data.end, 2000);
     assert.equal(built.data.schemaVersion, 'v1');
+    const queryFile = path.join(temporary, 'query.json');
+    fs.writeFileSync(queryFile, JSON.stringify(built.data));
+    const validated = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'validate', '--file', queryFile], {env: cliEnv}));
+    assert.deepEqual(validated, built.data);
     const invalid = spawnSync(process.execPath, [launcher, '--output', 'json', 'logs', 'search', '--since', '0h'], {encoding: 'utf8', env: cliEnv});
     assert.equal(invalid.status, 2);
     assert.equal(invalid.stdout, '');

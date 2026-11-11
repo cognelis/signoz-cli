@@ -239,7 +239,7 @@ rules list|get|history|history-stats|history-status|history-contributors
 dashboards list|get
 views list|get
 channels list|get
-query run|preview
+query build|validate|run|preview
 ```
 
 The client retries replay-safe requests on transport failures (including interrupted response bodies), HTTP 429, 502, 503, and 504, for at most three attempts within the original timeout. Oversized responses and complete responses containing invalid JSON are not retried. Responses are capped at 64 MiB. Feature-specific 404 responses report an unsupported server capability instead of pretending that a resource is missing. Public v2/v5 routes are used for dashboards, metrics, Query Builder, rule history, and infrastructure; services, dependency maps, exceptions, and Explorer views are explicitly maintained as first-party UI/MCP compatibility adapters because SigNoz has not published equivalent stable read contracts for those views.
@@ -392,3 +392,19 @@ signoz-cli --profile <chosen-profile> query run --file request.json
 
 Reuse the reviewed file so the relative time window does not move between
 steps. Payloads contain supplied filter/search values; review them before sharing.
+
+### Validate a saved query offline
+
+```sh
+signoz-cli --raw query validate --file request.json > validated.json
+cat request.json | signoz-cli --output json query validate --file -
+```
+
+This checks JSON and the top-level Query Builder v5 structure without loading
+configuration or contacting SigNoz. It shares validation with preview/run and
+adds `schemaVersion: "v1"` if omitted; other fields are preserved. Invalid input
+exits 2 with empty stdout. It does not check filter/SQL syntax, field existence,
+or server compatibility. Use server `query preview` after the normal preflight.
+Use a different output filename: shell redirection to the input file truncates
+it before the CLI starts. `--raw` prints a reusable payload; normal JSON wraps it
+in the `query.validate` envelope.
