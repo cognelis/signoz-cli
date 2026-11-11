@@ -1643,10 +1643,7 @@ fn tolerant_data_array(response: &mut Value) -> Option<&mut Vec<Value>> {
     let data = object
         .entry("data")
         .or_insert_with(|| Value::Array(Vec::new()));
-    if !data.is_array() {
-        *data = Value::Array(Vec::new());
-    }
-    data.as_array_mut()
+    array_or_null(data)
 }
 
 fn apply_pagination_meta(meta: &mut Meta, response: &Value) {
@@ -1936,6 +1933,40 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn legacy_lists_reject_invalid_data_without_turning_it_into_an_empty_list() {
+        for data in [
+            json!({"items": []}),
+            json!("invalid"),
+            json!(7),
+            json!(false),
+        ] {
+            let mut response = json!({"status": "success", "data": data});
+            let before = response.clone();
+            let error = apply_list_pagination(
+                &mut Meta::default(),
+                &mut response,
+                10,
+                0,
+                ListShape::TolerantData,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::IncompatibleResponse);
+            assert_eq!(response, before);
+        }
+        for mut response in [
+            json!({"status": "success"}),
+            json!({"data": null}),
+            json!({"data": []}),
+        ] {
+            let mut meta = Meta::default();
+            apply_list_pagination(&mut meta, &mut response, 10, 0, ListShape::TolerantData)
+                .unwrap();
+            assert_eq!(meta.total, Some(0));
+            assert_eq!(response["data"], json!([]));
+        }
+    }
 
     #[test]
     fn pagination_never_advertises_an_offset_that_cannot_advance() {

@@ -824,6 +824,37 @@ async fn public_dashboard_list_uses_server_side_search_sort_and_pagination() {
 }
 
 #[tokio::test]
+async fn legacy_list_shape_errors_are_reported_without_echoing_the_payload() {
+    for (group, route) in [
+        ("views", "/api/v1/explorer/views"),
+        ("channels", "/api/v1/channels"),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"data": {"secret": "TOP_SECRET"}})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut command = Command::cargo_bin("signoz-cli").unwrap();
+        command
+            .args(["--url", &server.uri(), "--output", "json", group, "list"])
+            .env("SIGNOZ_API_KEY", "test-secret");
+        if group == "views" {
+            command.args(["--source-page", "logs"]);
+        }
+        command
+            .assert()
+            .code(7)
+            .stdout("")
+            .stderr(predicate::str::contains("incompatible_response"))
+            .stderr(predicate::str::contains("TOP_SECRET").not());
+    }
+}
+
+#[tokio::test]
 async fn empty_and_incompatible_list_shapes_are_distinguished() {
     let empty_server = MockServer::start().await;
     Mock::given(method("GET"))

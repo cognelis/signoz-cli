@@ -6,6 +6,14 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-11
+
+### Fixed
+
+- Views and channels lists reject non-array `data` as an incompatible response
+  (exit 7), instead of silently replacing it with an empty list and reporting
+  zero items. Missing, null, and empty-array legacy responses remain supported.
+
 ## [0.7.1] - 2026-11-11
 
 ### Fixed
