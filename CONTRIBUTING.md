@@ -124,3 +124,17 @@ are updated by `signoz-cli skills install`.
 提交正文、验证记录和 AI 署名遵循 [提交规范](docs/commit-conventions.md)。项目维护者及 AI 协作工具见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
 
 本轮本地安装和 Skill 内容已核验；Rust 两个包的 npm tarball 安装冒烟通过。三个 doctor 的实际表格输出保持原样，维护检查只追加行。
+
+## 第八轮 RSI：新能力与 Skill 工作流优化
+
+现有 doctor 能报告版本概览，installer 能比较文件但会执行写入；缺少升级后、刷新前的只读内容检查。
+新增 skills status，复用安装目标、文件清单与版本解析，输出文件级差异，不增加依赖。
+接受场景包括未安装、相同版本但被修改、引用丢失、不可读路径，以及损坏业务配置下的离线执行。
+只检查 CLI 托管的全局 Codex/Claude 安装位置；不扩展任意目录或项目扫描参数。
+
+Skill 增加任务分流：本地维护直接使用离线命令，数据任务继续选环境并运行 doctor；刷新前审阅自定义内容，
+刷新后核对并重载上下文。CLI 测试证明工作流可执行，不把这些通过率当作 Agent 任务成功率。
+
+第八轮验收：0.8.0：161 项 Rust 测试、9 项 Node 安装测试、13 项 Python 测试、fmt/clippy、Agent 集成与发布检查通过。 当前未做模型级 Skill 效果评测或其他平台运行验证。
+
+本机验证：刷新前，三个 CLI 的托管安装都被新命令识别为 different；确认没有本地自定义修改后显式刷新，结果全部转为 current。独立校验 124 个文件与源码一致。两个 Rust npm 包的安装冒烟也验证了只读 skills status 入口。

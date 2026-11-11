@@ -142,15 +142,25 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
         .await;
     }
     if let Command::Skills { command } = &cli.command {
-        let results = match command {
-            SkillsCommand::Install { target } => {
-                crate::skill_install::install(*target).map_err(AppError::config)?
-            }
+        let (name, data) = match command {
+            SkillsCommand::Install { target } => (
+                "skills.install",
+                serde_json::to_value(
+                    crate::skill_install::install(*target).map_err(AppError::config)?,
+                )
+                .expect("Skill installation is serializable"),
+            ),
+            SkillsCommand::Status { target } => (
+                "skills.status",
+                serde_json::to_value(
+                    crate::skill_install::status(*target).map_err(AppError::config)?,
+                )
+                .expect("Skill status is serializable"),
+            ),
         };
         return Ok(DispatchResult {
-            command: "skills.install".into(),
-            data: serde_json::to_value(results)
-                .expect("Skill installer result paths are guaranteed strings"),
+            command: name.into(),
+            data,
             meta: Meta::default(),
             failure_code: None,
         });

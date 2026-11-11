@@ -1,10 +1,19 @@
 ---
-version: 0.7.2
+version: 0.8.0
 name: signoz-cli
 description: Query SigNoz observability data with the signoz-cli executable - logs, traces, metrics, services, exceptions, alerts, rules, dashboards, and infrastructure across named profiles such as test and prod. Use it for SigNoz investigations and whenever the user asks for the CLI, a shell command, CI, or JSON output; when the SigNoz MCP server is configured, prefer its tools.
 ---
 
 # SigNoz CLI
+
+## Choose the next step
+
+- **Local installation or Skill maintenance:** run `signoz-cli skills status --target codex --output json` (or `--target claude` / `all`). This is offline and read-only; it needs no profile selection, credentials, or doctor preflight.
+- **Data investigation or changes:** follow the environment-selection and doctor rules below before the first data operation. Production and write permissions still require the user's stated intent.
+- **After a CLI upgrade:** inspect `changedFiles`, `missingFiles`, and `unreadableFiles` before refreshing Skills. If managed files contain intentional local edits, review them before running `skills install`; do not silently overwrite customizations. Unmanaged files are ignored and preserved.
+- **After an intended refresh:** run `skills status` again, then reload the agent context. `current` proves managed file contents match this CLI's bundle; it does not prove the agent has loaded them.
+
+`skills status` reports `current`, `different`, `missing` (no SKILL.md), or `unreadable`. It returns installed and bundled versions, paths, and relative file lists without printing file contents. Exit 0 means inspection completed, even if files differ; inspect `data[].status` for alignment.
 
 ## Doctor version checks
 

@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -69,6 +69,25 @@ const CLAUDE_FILES: &[ManagedFile] = &[ManagedFile {
 }];
 
 pub fn install(target: SkillTarget) -> Result<Vec<InstallResult>, String> {
+    install_targets(&environment_targets(target)?)
+}
+
+pub fn status(target: SkillTarget) -> Result<Vec<StatusResult>, String> {
+    Ok(environment_targets(target)?
+        .iter()
+        .map(|target| {
+            let files: Vec<_> = target
+                .agent
+                .managed_files()
+                .iter()
+                .map(|file| (file.relative_path, file.contents))
+                .collect();
+            inspect_skill(target.agent, "signoz-cli", &target.directory, &files)
+        })
+        .collect())
+}
+
+fn environment_targets(target: SkillTarget) -> Result<Vec<InstallTarget>, String> {
     let home = env::var_os("HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
@@ -76,9 +95,7 @@ pub fn install(target: SkillTarget) -> Result<Vec<InstallResult>, String> {
     let claude_config = env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    let targets = resolve_targets(target, home.as_deref(), claude_config.as_deref())?;
-
-    install_targets(&targets)
+    resolve_targets(target, home.as_deref(), claude_config.as_deref())
 }
 
 fn resolve_targets(
@@ -240,6 +257,91 @@ pub(crate) fn bundled_skills() -> Vec<(&'static str, &'static str)> {
         "signoz-cli",
         std::str::from_utf8(SKILL).expect("bundled Skill is UTF-8"),
     )]
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillStatus {
+    Current,
+    Different,
+    Missing,
+    Unreadable,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusResult {
+    pub agent: Agent,
+    pub skill: String,
+    pub path: String,
+    pub status: SkillStatus,
+    pub bundled_version: &'static str,
+    pub installed_version: Option<String>,
+    pub changed_files: Vec<String>,
+    pub missing_files: Vec<String>,
+    pub unreadable_files: Vec<String>,
+}
+
+fn inspect_skill(
+    agent: Agent,
+    skill: &str,
+    directory: &Path,
+    files: &[(&str, &[u8])],
+) -> StatusResult {
+    let mut result = StatusResult {
+        agent,
+        skill: skill.into(),
+        path: directory.to_string_lossy().into_owned(),
+        status: SkillStatus::Current,
+        bundled_version: env!("CARGO_PKG_VERSION"),
+        installed_version: None,
+        changed_files: Vec::new(),
+        missing_files: Vec::new(),
+        unreadable_files: Vec::new(),
+    };
+    for &(relative, expected) in files {
+        let path = directory.join(relative);
+        let contents = fs::metadata(&path).and_then(|metadata| {
+            if !metadata.is_file() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "not a regular file",
+                ));
+            }
+            // One extra byte detects larger edited files without reading unbounded content.
+            let mut bytes = Vec::new();
+            fs::File::open(&path)?
+                .take(expected.len() as u64 + 1)
+                .read_to_end(&mut bytes)?;
+            Ok(bytes)
+        });
+        match contents {
+            Ok(bytes) => {
+                if relative == "SKILL.md" {
+                    result.installed_version =
+                        crate::maintenance::skill_version(&String::from_utf8_lossy(&bytes))
+                            .map(str::to_owned);
+                }
+                if bytes != expected {
+                    result.changed_files.push(relative.into());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                result.missing_files.push(relative.into())
+            }
+            Err(_) => result.unreadable_files.push(relative.into()),
+        }
+    }
+    result.status = if !result.unreadable_files.is_empty() {
+        SkillStatus::Unreadable
+    } else if result.missing_files.iter().any(|file| file == "SKILL.md") {
+        SkillStatus::Missing
+    } else if !result.changed_files.is_empty() || !result.missing_files.is_empty() {
+        SkillStatus::Different
+    } else {
+        SkillStatus::Current
+    };
+    result
 }
 
 #[cfg(test)]
