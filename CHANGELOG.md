@@ -6,6 +6,32 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-11-11
+
+### Fixed
+
+- Resource identifiers encode spaces as `%20` in URL paths, keeping spaces
+  distinct from literal `+` characters for rules, dashboards, views, and channels.
+- Update the locked transitive `chacha20` dependency from the yanked 0.10.1 to
+  0.10.2, matching the compatible dependency fix validated in mongodb-cli.
+
+## [0.6.3] - 2026-11-11
+
+### Fixed
+
+- Replay-safe requests now retry interrupted response body reads within the
+  existing three-attempt limit and total timeout. Non-replay-safe requests,
+  oversized responses, and complete but invalid JSON responses are not retried.
+
+## [0.6.2] - 2026-11-11
+
+### Fixed
+
+- Relative time windows reject integer underflow instead of panicking or wrapping.
+  Cost Meter queries safely align extreme timestamps to complete hours and return
+  validation errors when hourly boundaries cannot be represented, rather than
+  overflowing or silently clamping the requested range.
+
 ## [0.6.1] - 2026-10-12
 
 ### Changed

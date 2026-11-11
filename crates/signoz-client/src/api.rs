@@ -435,7 +435,9 @@ impl SigNozClient {
 }
 
 fn segment(value: &str) -> String {
-    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+    url::form_urlencoded::byte_serialize(value.as_bytes())
+        .collect::<String>()
+        .replace('+', "%20")
 }
 
 fn nanos(milliseconds: i64) -> String {
@@ -480,6 +482,20 @@ mod tests {
     #[test]
     fn identifiers_are_encoded_as_single_path_segments() {
         assert_eq!(Operation::rule_get("a/b").path(), "/api/v2/rules/a%2Fb");
+        for operation in [
+            Operation::rule_get("a b+c/?#中文"),
+            Operation::dashboard_get("a b+c/?#中文"),
+            Operation::view_get("a b+c/?#中文"),
+            Operation::channel_get("a b+c/?#中文"),
+        ] {
+            assert!(
+                operation
+                    .path()
+                    .ends_with("/a%20b%2Bc%2F%3F%23%E4%B8%AD%E6%96%87"),
+                "{}",
+                operation.path()
+            );
+        }
     }
 
     #[test]

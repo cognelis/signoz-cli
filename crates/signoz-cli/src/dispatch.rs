@@ -1219,7 +1219,11 @@ fn meter_window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppEr
         args.as_client_args()
     };
     let resolved = value.resolve(now).map_err(AppError::validation)?;
-    let end_ms = resolved.end_ms.div_euclid(HOUR_MS) * HOUR_MS;
+    let out_of_bounds = || AppError::validation("Cost Meter hourly time range is out of bounds");
+    let end_ms = resolved
+        .end_ms
+        .checked_sub(resolved.end_ms.rem_euclid(HOUR_MS))
+        .ok_or_else(out_of_bounds)?;
     let (start_ms, end_ms) = if relative {
         let complete_hours = (resolved.end_ms - resolved.start_ms).div_euclid(HOUR_MS);
         if complete_hours < 1 {
@@ -1228,15 +1232,17 @@ fn meter_window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppEr
             ));
         }
         (
-            end_ms.saturating_sub(complete_hours.saturating_mul(HOUR_MS)),
+            end_ms
+                .checked_sub(complete_hours * HOUR_MS)
+                .ok_or_else(out_of_bounds)?,
             end_ms,
         )
     } else {
-        let start_ms = if resolved.start_ms.rem_euclid(HOUR_MS) == 0 {
-            resolved.start_ms
-        } else {
-            resolved.start_ms.div_euclid(HOUR_MS) * HOUR_MS + HOUR_MS
-        };
+        let remainder = resolved.start_ms.rem_euclid(HOUR_MS);
+        let start_ms = resolved
+            .start_ms
+            .checked_add((HOUR_MS - remainder) % HOUR_MS)
+            .ok_or_else(out_of_bounds)?;
         (start_ms, end_ms)
     };
     if start_ms >= end_ms {
@@ -1993,5 +1999,59 @@ mod tests {
         let error = meter_window(&args, now).unwrap_err();
 
         assert!(error.message.contains("complete hour"));
+    }
+
+    #[test]
+    fn absolute_meter_windows_align_extreme_timestamps_without_overflow() {
+        let args = TimeArgs {
+            since: None,
+            start: Some(format!("@{}", i64::MIN)),
+            end: Some(format!("@{}", i64::MAX)),
+        };
+        let window = meter_window(&args, Utc::now()).unwrap();
+        assert_eq!(window.start_ms, -9_223_372_036_854_000_000);
+        assert_eq!(window.end_ms, 9_223_372_036_854_000_000);
+    }
+
+    #[test]
+    fn absolute_meter_windows_keep_only_complete_hours_around_the_epoch() {
+        for (start, end, expected) in [
+            (-7_200_001, 1, (-7_200_000, 0)),
+            (0, 7_200_000, (0, 7_200_000)),
+            (-1, 3_600_000, (0, 3_600_000)),
+        ] {
+            let args = TimeArgs {
+                since: None,
+                start: Some(format!("@{start}")),
+                end: Some(format!("@{end}")),
+            };
+            let window = meter_window(&args, Utc::now()).unwrap();
+            assert_eq!((window.start_ms, window.end_ms), expected);
+        }
+    }
+
+    #[test]
+    fn meter_windows_reject_unrepresentable_hour_boundaries() {
+        let now = DateTime::from_timestamp_millis(-1).unwrap();
+        for args in [
+            TimeArgs {
+                since: None,
+                start: Some(format!("@{}", i64::MIN)),
+                end: Some(format!("@{}", i64::MIN + 1)),
+            },
+            TimeArgs {
+                since: None,
+                start: Some(format!("@{}", i64::MAX - 1)),
+                end: Some(format!("@{}", i64::MAX)),
+            },
+            TimeArgs {
+                since: Some(format!("{}ms", i64::MAX)),
+                start: None,
+                end: None,
+            },
+        ] {
+            let error = meter_window(&args, now).unwrap_err();
+            assert_eq!(error.code, ErrorCode::Validation);
+        }
     }
 }

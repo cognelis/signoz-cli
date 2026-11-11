@@ -44,10 +44,11 @@ impl TimeWindowArgs {
                 return Err("--since conflicts with --start and --end".into());
             }
             let duration = parse_duration_ms(since)?;
-            return Ok(TimeWindow {
-                start_ms: now.timestamp_millis() - duration,
-                end_ms: now.timestamp_millis(),
-            });
+            let end_ms = now.timestamp_millis();
+            let start_ms = end_ms
+                .checked_sub(duration)
+                .ok_or_else(|| "relative time range is out of bounds".to_owned())?;
+            return Ok(TimeWindow { start_ms, end_ms });
         }
         match (&self.start, &self.end) {
             (Some(start), Some(end)) => {
@@ -130,5 +131,22 @@ mod tests {
             .resolve(now)
             .unwrap();
         assert_eq!((window.start_ms, window.end_ms), (1000, 2000));
+    }
+
+    #[test]
+    fn relative_windows_reject_underflow_and_preserve_representable_boundaries() {
+        let now = DateTime::from_timestamp_millis(-2).unwrap();
+        assert!(
+            TimeWindowArgs::since(format!("{}ms", i64::MAX))
+                .resolve(now)
+                .is_err()
+        );
+
+        let now = DateTime::from_timestamp_millis(-1).unwrap();
+        let window = TimeWindowArgs::since(format!("{}ms", i64::MAX))
+            .resolve(now)
+            .unwrap();
+        assert_eq!(window.start_ms, i64::MIN);
+        assert_eq!(window.end_ms, -1);
     }
 }

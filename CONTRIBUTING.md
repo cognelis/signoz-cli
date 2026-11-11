@@ -32,6 +32,12 @@ versions belong in the plugin manifests.
 
 ## Record changes as you work
 
+For evidence-driven improvement iterations, follow the
+[RSI workflow and first experiment](docs/research/2026-11-11-rsi.md): reproduce a
+failure before changing behavior, preserve the regression case, check neighboring
+valid cases, and accept changes only after the existing validation gates pass.
+Static Skill checks establish instruction coverage, not measured agent success.
+
 Add concise, user-facing entries under `CHANGELOG.md`'s `Unreleased` section using
 `Added`, `Changed`, `Fixed`, `Removed`, or `Security` as appropriate. Include
 migration notes when commands, authentication, defaults, or public APIs change.

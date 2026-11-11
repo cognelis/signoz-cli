@@ -175,15 +175,22 @@ impl HttpTransport {
                         .and_then(|value| value.to_str().ok())
                         .map(|value| self.credentials.redact(value));
                     let retry_after = retry_after(response.headers());
-                    let bytes = read_bounded(&mut response, self.max_response_bytes)
-                        .await
-                        .map_err(|error| {
-                            if error.code() == ErrorCode::ResponseTooLarge {
+                    let bytes = match read_bounded(&mut response, self.max_response_bytes).await {
+                        Ok(bytes) => bytes,
+                        Err(error)
+                            if error.code() == ErrorCode::Network && attempt + 1 < attempts =>
+                        {
+                            tokio::time::sleep(retry_delay(attempt)).await;
+                            continue;
+                        }
+                        Err(error) => {
+                            return Err(if error.code() == ErrorCode::ResponseTooLarge {
                                 error.with_status(status.as_u16())
                             } else {
                                 error
-                            }
-                        })?;
+                            });
+                        }
+                    };
                     let text = String::from_utf8_lossy(&bytes);
                     if !status.is_success() {
                         let safe_text = self.credentials.redact(&text);

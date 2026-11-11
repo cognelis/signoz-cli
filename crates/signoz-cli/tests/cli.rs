@@ -1455,6 +1455,41 @@ fn raw_query_rejects_non_v5_json_before_network_access() {
         .stderr(predicate::str::contains("Query Builder v5"));
 }
 
+#[test]
+fn meter_hour_overflow_is_a_structured_validation_error_before_connection_setup() {
+    let directory = tempfile::tempdir().unwrap();
+    for (start, end) in [(i64::MIN, i64::MIN + 1), (i64::MAX - 1, i64::MAX)] {
+        let output = Command::cargo_bin("signoz-cli")
+            .unwrap()
+            .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
+            .env("SIGNOZ_CLI_CREDENTIAL_STORE", "file")
+            .env_remove("SIGNOZ_URL")
+            .env_remove("SIGNOZ_API_KEY")
+            .args([
+                "--output",
+                "json",
+                "meters",
+                "summary",
+                "--start",
+                &format!("@{start}"),
+                "--end",
+                &format!("@{end}"),
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["code"], "validation");
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("out of bounds")
+        );
+    }
+}
+
 #[tokio::test]
 async fn raw_query_inserts_an_omitted_v5_schema_version() {
     let server = MockServer::start().await;

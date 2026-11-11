@@ -242,7 +242,7 @@ channels list|get
 query run|preview
 ```
 
-The client retries replay-safe requests on transport failures, HTTP 429, 502, 503, and 504, for at most three attempts. Responses are capped at 64 MiB. Feature-specific 404 responses report an unsupported server capability instead of pretending that a resource is missing. Public v2/v5 routes are used for dashboards, metrics, Query Builder, rule history, and infrastructure; services, dependency maps, exceptions, and Explorer views are explicitly maintained as first-party UI/MCP compatibility adapters because SigNoz has not published equivalent stable read contracts for those views.
+The client retries replay-safe requests on transport failures (including interrupted response bodies), HTTP 429, 502, 503, and 504, for at most three attempts within the original timeout. Oversized responses and complete responses containing invalid JSON are not retried. Responses are capped at 64 MiB. Feature-specific 404 responses report an unsupported server capability instead of pretending that a resource is missing. Public v2/v5 routes are used for dashboards, metrics, Query Builder, rule history, and infrastructure; services, dependency maps, exceptions, and Explorer views are explicitly maintained as first-party UI/MCP compatibility adapters because SigNoz has not published equivalent stable read contracts for those views.
 
 Exit codes are stable:
 
@@ -305,6 +305,8 @@ In Claude Code, use `/plugin marketplace add SigNoz/agent-skills` followed by `/
 - Metric usage requires SigNoz 0.131 or newer.
 - Metric inspect accepts at most a 30-minute window.
 - Cost Meter queries default to seven days, use the documented `meter` source, and enforce a minimum one-hour step.
+- Time arithmetic that exceeds signed 64-bit milliseconds, including Cost Meter
+  hourly alignment, returns a validation error (exit code 2).
 - Service, dependency, exception, and Explorer-view commands may be unavailable when an internal SigNoz compatibility endpoint changes; the CLI returns exit code 7 in that case.
 - The CLI accepts self-hosted HTTP origins but does not provide an insecure TLS bypass.
 - Reverse-proxy base paths such as `https://example.com/observability/signoz` are preserved.
