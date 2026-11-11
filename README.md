@@ -426,3 +426,19 @@ and cannot be combined with it. Use `--filter` for aggregation predicates.
 Review the fixed time window, grouping and units, then reuse the same file for
 `query validate`, server preview and execution. Building does not validate
 field availability or filter syntax against a server.
+
+### Save a query without shell redirection
+
+```sh
+signoz-cli query build --signal logs --since 1h --out request.json
+signoz-cli query validate --file request.json --out request.json
+```
+
+`--out` saves the raw payload, independent of `--output`/`--raw`; stdout still
+uses the normal output format. `--out -` keeps stdout-only behavior. The entire
+query is built or validated before a temporary file beside the destination is
+renamed into place, allowing safe in-place normalization. Invalid input leaves
+the destination unchanged. Parent directories must exist; Unix files are 0600.
+A destination symlink is replaced, not followed. The file can be passed directly
+to `query preview/run --file` after normal preflight; local validation is not
+server validation. Do not use shell redirection over the input file.

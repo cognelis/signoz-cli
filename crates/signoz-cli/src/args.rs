@@ -1099,6 +1099,11 @@ pub enum QueryCommand {
         time: TimeArgs,
         #[command(flatten)]
         page: PaginationArgs,
+        /// Save the query atomically to a file.
+        ///
+        /// Write the raw payload regardless of stdout format; - keeps stdout only.
+        #[arg(long, value_hint = clap::ValueHint::FilePath)]
+        out: Option<PathBuf>,
     },
     /// Validate query structure locally.
     ///
@@ -1107,6 +1112,11 @@ pub enum QueryCommand {
         /// Read query JSON from a file or stdin (-).
         #[arg(long, default_value = "-", value_hint = clap::ValueHint::FilePath)]
         file: PathBuf,
+        /// Save the validated query atomically.
+        ///
+        /// The input is fully validated before replacing this path; - keeps stdout only.
+        #[arg(long, value_hint = clap::ValueHint::FilePath)]
+        out: Option<PathBuf>,
     },
     /// Run a query payload.
     Run {

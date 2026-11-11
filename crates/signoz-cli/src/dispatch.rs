@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -89,11 +89,13 @@ enum Prepared {
 
 pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     if let Command::Query {
-        command: QueryCommand::Validate { file },
+        command: QueryCommand::Validate { file, out },
     } = &cli.command
     {
+        let body = read_query_body(file)?;
+        save_query(out.as_deref(), &body)?;
         return Ok(DispatchResult {
-            command: "query.validate".into(), data: read_query_body(file)?,
+            command: "query.validate".into(), data: body,
             meta: Meta { warnings: vec!["validated locally: structure only; filter syntax and server compatibility are not checked; use query preview before execution".into()], ..Meta::default() },
             failure_code: None,
         });
@@ -110,6 +112,7 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
                 step,
                 time,
                 page,
+                out,
             },
     } = &cli.command
     {
@@ -139,6 +142,7 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
                 now,
             )?
         };
+        save_query(out.as_deref(), &body)?;
         return Ok(DispatchResult { command: "query.build".into(), data: body,
             meta: Meta { warnings: vec!["built locally; filter syntax and server compatibility are not validated; use query preview before execution".into()], ..Meta::default() }, failure_code: None });
     }
@@ -1949,6 +1953,28 @@ fn read_input(path: &Path) -> Result<String, AppError> {
     } else {
         fs::read_to_string(path).map_err(|error| AppError::validation(error.to_string()))
     }
+}
+
+fn save_query(path: Option<&Path>, body: &Value) -> Result<(), AppError> {
+    let Some(path) = path.filter(|path| *path != Path::new("-")) else {
+        return Ok(());
+    };
+    let mut bytes =
+        serde_json::to_vec_pretty(body).map_err(|error| AppError::validation(error.to_string()))?;
+    bytes.push(b'\n');
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let write_error =
+        |error| AppError::validation(format!("cannot save query to {}: {error}", path.display()));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(write_error)?;
+    temporary.write_all(&bytes).map_err(write_error)?;
+    temporary.flush().map_err(write_error)?;
+    temporary
+        .persist(path)
+        .map_err(|error| write_error(error.error))?;
+    Ok(())
 }
 
 fn read_query_body(path: &Path) -> Result<Value, AppError> {

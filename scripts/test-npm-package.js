@@ -63,8 +63,9 @@ async function main() {
     assert.equal(built.data.schemaVersion, 'v1');
     const queryFile = path.join(temporary, 'query.json');
     fs.writeFileSync(queryFile, JSON.stringify(built.data));
-    const validated = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'validate', '--file', queryFile], {env: cliEnv}));
+    const validated = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'validate', '--file', queryFile, '--out', queryFile], {env: cliEnv}));
     assert.deepEqual(validated, built.data);
+    assert.deepEqual(JSON.parse(fs.readFileSync(queryFile, 'utf8')), built.data);
     const aggregate = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'build', '--signal', 'logs', '--aggregation', 'count', '--group-by', 'service.name', '--step', '60', '--start', '@1000', '--end', '@121000'], {env: cliEnv}));
     assert.equal(aggregate.requestType, 'time_series');
     assert.equal(aggregate.compositeQuery.queries[0].spec.aggregations[0].expression, 'count()');

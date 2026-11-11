@@ -8,6 +8,11 @@ baselines, not evidence of a published release.
 
 ### Added
 
+- `query build` and `query validate` accept `--out PATH` to atomically save
+  the raw payload while retaining normal stdout output. Validation completes before
+  replacement, so validate can safely normalize an input file in place. Unix output
+  files are owner-only; symlink destinations are replaced without following them.
+
 - `query build` now supports `--aggregation`, `--aggregate-on`, repeated
   `--group-by`, and `--step` for offline scalar, grouped, and time-series log/trace
   requests. It reuses execution builders and validation; aggregation refuses

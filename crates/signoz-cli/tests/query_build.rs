@@ -269,3 +269,99 @@ fn aggregation_build_rejects_ambiguous_or_incomplete_options() {
             .stdout("");
     }
 }
+
+#[test]
+fn saves_queries_atomically_and_can_validate_in_place() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("broken.toml");
+    std::fs::write(&config, "bad = [").unwrap();
+    let file = root.path().join("query.json");
+    let output = builder(&config)
+        .args(["--signal", "logs", "--aggregation", "count", "--out"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap()
+    );
+    let mut body: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    body.as_object_mut().unwrap().remove("schemaVersion");
+    std::fs::write(&file, body.to_string()).unwrap();
+    Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args(["query", "validate", "--file"])
+        .arg(&file)
+        .arg("--out")
+        .arg(&file)
+        .assert()
+        .success();
+    let normalized: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(normalized["schemaVersion"], "v1");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    std::fs::write(&file, "invalid").unwrap();
+    Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args(["query", "validate", "--file"])
+        .arg(&file)
+        .arg("--out")
+        .arg(&file)
+        .assert()
+        .code(2)
+        .stdout("");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "invalid");
+    let dir = root.path().join("not-a-file");
+    std::fs::create_dir(&dir).unwrap();
+    let before = std::fs::read_dir(root.path()).unwrap().count();
+    builder(&config)
+        .args(["--signal", "logs", "--out"])
+        .arg(&dir)
+        .assert()
+        .code(2)
+        .stdout("");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), before);
+    assert!(dir.is_dir());
+    builder(&config)
+        .current_dir(root.path())
+        .args(["--signal", "logs", "--out", "relative.json"])
+        .assert()
+        .success();
+    assert!(root.path().join("relative.json").is_file());
+    builder(&config)
+        .current_dir(root.path())
+        .args(["--signal", "logs", "--out", "-"])
+        .assert()
+        .success();
+    assert!(!root.path().join("-").exists());
+    #[cfg(unix)]
+    {
+        let link = root.path().join("link.json");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        builder(&config)
+            .args(["--signal", "logs", "--out"])
+            .arg(&link)
+            .assert()
+            .success();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "invalid");
+        assert!(
+            !std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+}
