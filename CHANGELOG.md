@@ -6,6 +6,14 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-11-11
+
+### Fixed
+
+- Service and exception compatibility requests preserve exact millisecond-to-
+  nanosecond conversion across the full input range instead of silently clamping
+  timestamps to signed 64-bit limits. Server-side range restrictions still apply.
+
 ## [0.6.4] - 2026-11-11
 
 ### Fixed

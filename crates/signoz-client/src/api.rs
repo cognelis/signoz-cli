@@ -441,7 +441,7 @@ fn segment(value: &str) -> String {
 }
 
 fn nanos(milliseconds: i64) -> String {
-    milliseconds.saturating_mul(1_000_000).to_string()
+    (i128::from(milliseconds) * 1_000_000).to_string()
 }
 
 fn insert_optional_string(body: &mut Value, key: &str, value: Option<&str>) {
@@ -478,6 +478,21 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{FieldQuery, Operation};
+
+    #[test]
+    fn compatibility_timestamps_do_not_silently_saturate() {
+        for operation in [
+            Operation::services_list(i64::MIN, i64::MAX),
+            Operation::service_operations("checkout", i64::MIN, i64::MAX),
+            Operation::service_dependencies(i64::MIN, i64::MAX),
+            Operation::exceptions_list(i64::MIN, i64::MAX, "desc", "timestamp", 10, 0, None, None),
+            Operation::exceptions_count(i64::MIN, i64::MAX, None, None),
+        ] {
+            let body = operation.body.unwrap();
+            assert_eq!(body["start"], "-9223372036854775808000000");
+            assert_eq!(body["end"], "9223372036854775807000000");
+        }
+    }
 
     #[test]
     fn identifiers_are_encoded_as_single_path_segments() {
