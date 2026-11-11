@@ -6,6 +6,14 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-11
+
+### Fixed
+
+- Offset-paginated responses no longer advertise a `nextOffset` that repeats the
+  current page after an empty response or integer overflow. `hasMore` is preserved
+  and a warning asks callers to narrow the time window or filter.
+
 ## [0.7.0] - 2026-11-11
 
 ### Changed

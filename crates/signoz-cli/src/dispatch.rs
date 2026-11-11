@@ -1695,7 +1695,15 @@ fn apply_pagination_meta(meta: &mut Meta, response: &Value) {
             }
         }
         if meta.has_more == Some(true) {
-            meta.next_offset = Some(offset.saturating_add(count as u32));
+            meta.next_offset = u32::try_from(count)
+                .ok()
+                .and_then(|count| offset.checked_add(count))
+                .filter(|next| *next > offset);
+            if meta.next_offset.is_none() {
+                meta.warnings.push(
+                    "more results may remain, but the next offset cannot advance; narrow the time window or filter instead of repeating this page".into(),
+                );
+            }
         }
     } else {
         meta.warnings.push(
@@ -1928,6 +1936,32 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn pagination_never_advertises_an_offset_that_cannot_advance() {
+        for (offset, data) in [(7, json!([])), (u32::MAX, json!([{}]))] {
+            let mut meta = Meta {
+                limit: Some(1),
+                offset: Some(offset),
+                ..Meta::default()
+            };
+            apply_pagination_meta(&mut meta, &json!({"data": data, "hasMore": true}));
+            assert_eq!(meta.has_more, Some(true));
+            assert_eq!(meta.next_offset, None);
+            assert!(
+                meta.warnings
+                    .iter()
+                    .any(|message| message.contains("cannot advance"))
+            );
+        }
+        let mut meta = Meta {
+            limit: Some(1),
+            offset: Some(u32::MAX - 1),
+            ..Meta::default()
+        };
+        apply_pagination_meta(&mut meta, &json!({"data": [{}], "hasMore": true}));
+        assert_eq!(meta.next_offset, Some(u32::MAX));
+    }
 
     #[test]
     fn profile_update_saves_the_new_destination_and_reports_credential_invalidation() {

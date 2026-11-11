@@ -1,5 +1,5 @@
 ---
-version: 0.7.0
+version: 0.7.1
 name: signoz-cli
 description: Query SigNoz observability data with the signoz-cli executable - logs, traces, metrics, services, exceptions, alerts, rules, dashboards, and infrastructure across named profiles such as test and prod. Use it for SigNoz investigations and whenever the user asks for the CLI, a shell command, CI, or JSON output; when the SigNoz MCP server is configured, prefer its tools.
 ---
@@ -240,6 +240,8 @@ A successful command exits cleanly when a consumer such as `head` closes stdout 
 `doctor` is the deliberate exception: a completed diagnostic always writes its ordered check array to stdout, including when it exits nonzero. Read `data[].name`, `data[].status` (`pass`, `fail`, or `skipped`), and `data[].message`; use the process exit code for the failure category. Do not discard stdout before interpreting a failed doctor run.
 
 For commands whose `meta.hasMore` is `true` and whose `meta.nextOffset` is present, repeat the same query with `--offset <meta.nextOffset>` until `hasMore` is `false` or the user-requested bound is reached. Keep the profile, filters, sort, and time window fixed; when the response provides resolved `meta.start` and `meta.end`, use them for subsequent pages rather than advancing a relative `--since` window. Commands without time-window options should not receive invented time flags. If the response contains a completeness warning or cannot expose a row count, report that the result may be incomplete; never describe a limit-sized page as the complete result. If `nextOffset` is absent, follow the command-specific rules below instead of inventing an offset.
+
+If `hasMore` is true but an empty page or offset overflow prevents pagination from advancing, the CLI omits `nextOffset` and warns. Narrow the time window or filter; do not repeat the same offset or invent a continuation.
 
 Exception: `metrics top` is a fixed-limit ranking with no offset pagination. Never add `--offset` to that command. If it reaches the cap, report the result as potentially incomplete and narrow the time window if that still answers the request.
 
