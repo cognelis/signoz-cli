@@ -9,11 +9,15 @@ description: Query SigNoz observability data with the signoz-cli executable - lo
 ## Choose the next step
 
 - **Local installation or Skill maintenance:** run `signoz-cli skills status --target codex --output json` (or `--target claude` / `all`). This is offline and read-only; it needs no profile selection, credentials, or doctor preflight.
-- **Data investigation or changes:** follow the environment-selection and doctor rules below before the first data operation. Production and write permissions still require the user's stated intent.
+- **Data execution:** follow the environment-selection and doctor rules below before the first data operation. Production and write permissions still require the user's stated intent.
 - **After a CLI upgrade:** inspect `changedFiles`, `missingFiles`, and `unreadableFiles` before refreshing Skills. If managed files contain intentional local edits, review them before running `skills install`; do not silently overwrite customizations. Unmanaged files are ignored and preserved.
 - **After an intended refresh:** run `skills status` again, then reload the agent context. `current` proves managed file contents match this CLI's bundle; it does not prove the agent has loaded them.
 
 `skills status` reports `current`, `different`, `missing` (no SKILL.md), or `unreadable`. It returns installed and bundled versions, paths, and relative file lists without printing file contents. Exit 0 means inspection completed, even if files differ; inspect `data[].status` for alignment.
+
+## Draft a log or trace investigation before connecting
+
+For request composition, use `query build --signal logs|traces` with the usual time/filter/limit/offset flags; `--search` applies only to logs. This is local and needs no profile or doctor. With `--raw`, save the generated v5 payload to a file, inspect its exact time window and predicates, then select the user-intended profile and run doctor before `query preview --file ... --explain` and `query run --file ...`. Reuse the same file across preview and execution. Local construction does not validate server-side filter syntax or compatibility, and supplied filter values may be sensitive.
 
 ## Doctor version checks
 

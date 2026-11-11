@@ -56,6 +56,11 @@ async function main() {
     assert.ok(skills.data.length > 0);
     assert.ok(skills.data.every(item => item.agent === 'claude' && item.status === 'missing' && item.bundledVersion === pkg.version));
     assert.ok(!fs.existsSync(cliEnv.CLAUDE_CONFIG_DIR), 'status must not create an installation');
+    const built = JSON.parse(run(process.execPath, [launcher, '--output', 'json', 'query', 'build', '--signal', 'logs', '--start', '@1000', '--end', '@2000'], {env: cliEnv}));
+    assert.equal(built.command, 'query.build');
+    assert.equal(built.data.start, 1000);
+    assert.equal(built.data.end, 2000);
+    assert.equal(built.data.schemaVersion, 'v1');
     const invalid = spawnSync(process.execPath, [launcher, '--output', 'json', 'logs', 'search', '--since', '0h'], {encoding: 'utf8', env: cliEnv});
     assert.equal(invalid.status, 2);
     assert.equal(invalid.stdout, '');

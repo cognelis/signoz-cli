@@ -88,6 +88,28 @@ enum Prepared {
 }
 
 pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
+    if let Command::Query {
+        command:
+            QueryCommand::Build {
+                signal,
+                search,
+                filter,
+                time,
+                page,
+            },
+    } = &cli.command
+    {
+        let body = search_query(
+            *signal,
+            search.as_deref(),
+            filter.as_deref(),
+            time,
+            page,
+            Utc::now(),
+        )?;
+        return Ok(DispatchResult { command: "query.build".into(), data: body,
+            meta: Meta { warnings: vec!["built locally; filter syntax and server compatibility are not validated; use query preview before execution".into()], ..Meta::default() }, failure_code: None });
+    }
     if let Command::Completion { shell } = &cli.command {
         return Ok(DispatchResult {
             command: "completion".into(),
@@ -837,13 +859,14 @@ fn prepare(
                 time,
                 page,
             } => {
-                let mut body = log_search(
-                    window(time, now)?,
+                let body = search_query(
+                    QueryBuildSignal::Logs,
                     search.as_deref(),
-                    page.limit,
-                    page.offset,
-                );
-                merge_filter(&mut body, filter.as_deref());
+                    filter.as_deref(),
+                    time,
+                    page,
+                    now,
+                )?;
                 operation("logs.search", Operation::query_raw(body))
             }
             LogsCommand::Aggregate {
@@ -873,12 +896,14 @@ fn prepare(
         Command::Traces { command } => match command {
             TracesCommand::Search { filter, time, page } => operation(
                 "traces.search",
-                Operation::query_raw(trace_search(
-                    window(time, now)?,
+                Operation::query_raw(search_query(
+                    QueryBuildSignal::Traces,
+                    None,
                     filter.as_deref(),
-                    page.limit,
-                    page.offset,
-                )),
+                    time,
+                    page,
+                    now,
+                )?),
             ),
             TracesCommand::Aggregate {
                 filter,
@@ -1166,6 +1191,9 @@ fn prepare(
             Operation::channel_get,
         ),
         Command::Query { command } => match command {
+            QueryCommand::Build { .. } => {
+                unreachable!("query build is handled before connection preparation")
+            }
             QueryCommand::Run { file } => {
                 let body = read_query_body(file)?;
                 operation("query.run", Operation::query_raw(body))
@@ -1205,6 +1233,32 @@ fn profile_description(text: &str) -> Result<String, AppError> {
         ));
     }
     Ok(text.to_owned())
+}
+
+fn search_query(
+    signal: QueryBuildSignal,
+    search: Option<&str>,
+    filter: Option<&str>,
+    time: &TimeArgs,
+    page: &PaginationArgs,
+    now: DateTime<Utc>,
+) -> Result<Value, AppError> {
+    let window = window(time, now)?;
+    match signal {
+        QueryBuildSignal::Logs => {
+            let mut body = log_search(window, search, page.limit, page.offset);
+            merge_filter(&mut body, filter);
+            Ok(body)
+        }
+        QueryBuildSignal::Traces => {
+            if search.is_some() {
+                return Err(AppError::validation(
+                    "--search is only supported for logs; use --filter for traces",
+                ));
+            }
+            Ok(trace_search(window, filter, page.limit, page.offset))
+        }
+    }
 }
 
 fn operation(command: &'static str, value: Operation) -> Result<Prepared, AppError> {

@@ -1064,8 +1064,30 @@ impl ViewSource {
     }
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum QueryBuildSignal {
+    Logs,
+    Traces,
+}
+
 #[derive(Clone, Debug, Subcommand)]
 pub enum QueryCommand {
+    /// Build a query locally without connecting.
+    Build {
+        /// Select logs or traces.
+        #[arg(long, value_enum)]
+        signal: QueryBuildSignal,
+        /// Search log body text (logs only).
+        #[arg(long)]
+        search: Option<String>,
+        /// Filter with a query expression.
+        #[arg(long)]
+        filter: Option<String>,
+        #[command(flatten)]
+        time: TimeArgs,
+        #[command(flatten)]
+        page: PaginationArgs,
+    },
     /// Run a query payload.
     Run {
         /// Read query JSON from a file or stdin (-).

@@ -6,6 +6,14 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
+### Added
+
+- `query build --signal logs|traces` builds a local Query Builder v5 search
+  payload using the same builders as execution. Time windows are resolved once;
+  `--raw` output can be saved and passed to `query preview` or `query run`.
+  No connection configuration, credentials, or network access is needed.
+
+
 ## [0.8.0] - 2026-11-11
 
 ### Added

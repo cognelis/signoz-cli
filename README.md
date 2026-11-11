@@ -367,3 +367,28 @@ Review local customizations before an intended `skills install`, verify status
 again afterward, then reload the agent context. File alignment does not prove
 that the running agent loaded the new Skill. Doctor remains the connection and
 version overview; this command provides per-file installation detail.
+
+## Unreleased: draft and review log/trace queries
+
+Build a fixed query payload locally, before selecting a connection:
+
+```sh
+signoz-cli --raw query build --signal logs --since 30m --search 'timeout' --filter "service.name = 'checkout'" > request.json
+signoz-cli --raw query build --signal traces --start '2026-11-11T00:00:00Z' --end '2026-11-11T01:00:00Z' --filter "service.name = 'checkout'" > traces.json
+```
+
+The same builders power normal log/trace search. `--limit` and `--offset` are
+supported, and `--search` is log-only. The generated v5 payload freezes the time
+range; it contains no connection credentials. Filter syntax and server
+compatibility are not validated locally.
+
+After reviewing the payload, select a configured profile by its name and
+purpose, run its doctor preflight, and use the existing server preview/run flow:
+
+```sh
+signoz-cli --profile <chosen-profile> query preview --file request.json --explain
+signoz-cli --profile <chosen-profile> query run --file request.json
+```
+
+Reuse the reviewed file so the relative time window does not move between
+steps. Payloads contain supplied filter/search values; review them before sharing.
