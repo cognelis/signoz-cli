@@ -8,6 +8,11 @@ baselines, not evidence of a published release.
 
 ### Added
 
+- `query build` now supports `--aggregation`, `--aggregate-on`, repeated
+  `--group-by`, and `--step` for offline scalar, grouped, and time-series log/trace
+  requests. It reuses execution builders and validation; aggregation refuses
+  raw-only `--search`/`--offset`, and dependent flags require `--aggregation`.
+
 - `query validate --file <path|->` checks Query Builder v5 structure offline,
   using the same validation as preview/run, and prints the normalized payload.
   Missing `schemaVersion` becomes `v1`; input files are never rewritten.

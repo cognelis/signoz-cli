@@ -181,3 +181,91 @@ fn validates_saved_queries_offline_and_emits_normalized_payloads() {
             .stdout("");
     }
 }
+
+#[tokio::test]
+async fn builds_aggregates_with_the_same_payload_as_direct_execution() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("empty.toml");
+    for signal in ["logs", "traces"] {
+        let options = [
+            "--aggregation",
+            "p99",
+            "--aggregate-on",
+            "duration_nano",
+            "--group-by",
+            "service.name",
+            "--step",
+            "60",
+            "--limit",
+            "7",
+            "--start",
+            "@1000",
+            "--end",
+            "@121000",
+        ];
+        let output = builder(&config)
+            .args(["--signal", signal])
+            .args(options)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(body["requestType"], "time_series");
+        assert_eq!(body["start"], 1000);
+        assert_eq!(body["end"], 121000);
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v5/query_range"))
+            .and(body_json(body))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {}})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Command::cargo_bin("signoz-cli")
+            .unwrap()
+            .env("SIGNOZ_CONFIG", &config)
+            .env("SIGNOZ_API_KEY", "test-secret")
+            .args(["--url", &server.uri(), signal, "aggregate"])
+            .args(options)
+            .assert()
+            .success();
+        server.verify().await;
+    }
+}
+
+#[test]
+fn aggregation_build_rejects_ambiguous_or_incomplete_options() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("broken.toml");
+    std::fs::write(&config, "bad = [").unwrap();
+    let output = builder(&config)
+        .args(["--signal", "logs", "--aggregation", "count"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["requestType"],
+        "scalar"
+    );
+    for args in [
+        vec!["--aggregation", "p99"],
+        vec!["--group-by", "service.name"],
+        vec!["--step", "60"],
+        vec!["--aggregate-on", "duration_nano"],
+        vec!["--aggregation", "count", "--offset", "0"],
+        vec!["--aggregation", "count", "--search", "error"],
+        vec!["--aggregation", "count", "--group-by", " "],
+        vec!["--aggregation", "count", "--step", "0"],
+    ] {
+        builder(&config)
+            .args(["--signal", "logs"])
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout("");
+    }
+}

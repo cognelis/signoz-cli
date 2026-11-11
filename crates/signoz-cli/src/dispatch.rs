@@ -104,19 +104,41 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
                 signal,
                 search,
                 filter,
+                aggregation,
+                aggregate_on,
+                group_by,
+                step,
                 time,
                 page,
             },
     } = &cli.command
     {
-        let body = search_query(
-            *signal,
-            search.as_deref(),
-            filter.as_deref(),
-            time,
-            page,
-            Utc::now(),
-        )?;
+        let now = Utc::now();
+        let body = if let Some(aggregation) = aggregation {
+            let expression = aggregate_expression(*aggregation, aggregate_on.as_deref())?;
+            validate_group_by(group_by)?;
+            let build = match signal {
+                QueryBuildSignal::Logs => log_aggregate,
+                QueryBuildSignal::Traces => trace_aggregate,
+            };
+            build(
+                window(time, now)?,
+                filter.as_deref(),
+                &expression,
+                group_by,
+                *step,
+                page.limit,
+            )
+        } else {
+            search_query(
+                *signal,
+                search.as_deref(),
+                filter.as_deref(),
+                time,
+                page,
+                now,
+            )?
+        };
         return Ok(DispatchResult { command: "query.build".into(), data: body,
             meta: Meta { warnings: vec!["built locally; filter syntax and server compatibility are not validated; use query preview before execution".into()], ..Meta::default() }, failure_code: None });
     }

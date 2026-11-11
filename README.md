@@ -408,3 +408,21 @@ or server compatibility. Use server `query preview` after the normal preflight.
 Use a different output filename: shell redirection to the input file truncates
 it before the CLI starts. `--raw` prints a reusable payload; normal JSON wraps it
 in the `query.validate` envelope.
+
+### Draft aggregations and time series offline
+
+```sh
+signoz-cli --raw query build --signal logs --aggregation count --group-by service.name --since 1h > counts.json
+signoz-cli --raw query build --signal traces --aggregation p99 --aggregate-on duration_nano --group-by service.name --step 60 --since 1h > latency.json
+```
+
+With `--aggregation`, the builder uses the same validation and payloads as
+`logs aggregate` / `traces aggregate`. All functions except `count` and `rate`
+require `--aggregate-on`. Without `--step` the request is scalar (grouped when
+`--group-by` is supplied); `--step` requests a time series in seconds.
+`--limit` limits groups, not raw records. `--aggregate-on`, `--group-by` and
+`--step` require an explicit aggregation; `--search` and `--offset` are raw-only
+and cannot be combined with it. Use `--filter` for aggregation predicates.
+Review the fixed time window, grouping and units, then reuse the same file for
+`query validate`, server preview and execution. Building does not validate
+field availability or filter syntax against a server.

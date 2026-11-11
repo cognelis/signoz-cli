@@ -65,6 +65,9 @@ async function main() {
     fs.writeFileSync(queryFile, JSON.stringify(built.data));
     const validated = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'validate', '--file', queryFile], {env: cliEnv}));
     assert.deepEqual(validated, built.data);
+    const aggregate = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'build', '--signal', 'logs', '--aggregation', 'count', '--group-by', 'service.name', '--step', '60', '--start', '@1000', '--end', '@121000'], {env: cliEnv}));
+    assert.equal(aggregate.requestType, 'time_series');
+    assert.equal(aggregate.compositeQuery.queries[0].spec.aggregations[0].expression, 'count()');
     const invalid = spawnSync(process.execPath, [launcher, '--output', 'json', 'logs', 'search', '--since', '0h'], {encoding: 'utf8', env: cliEnv});
     assert.equal(invalid.status, 2);
     assert.equal(invalid.stdout, '');

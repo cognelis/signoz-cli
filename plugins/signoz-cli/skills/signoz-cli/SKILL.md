@@ -17,9 +17,11 @@ description: Query SigNoz observability data with the signoz-cli executable - lo
 
 ## Draft a log or trace investigation before connecting
 
-For request composition, use `query build --signal logs|traces` with the usual time/filter/limit/offset flags; `--search` applies only to logs. This is local and needs no profile or doctor. With `--raw`, save the generated v5 payload to a file, inspect its exact time window and predicates, then select the user-intended profile and run doctor before `query preview --file ... --explain` and `query run --file ...`. Reuse the same file across preview and execution. Local construction does not validate server-side filter syntax or compatibility, and supplied filter values may be sensitive.
+For request composition, use `query build --signal logs|traces` with the usual time/filter/limit/offset flags; `--search` applies only to raw logs. This is local and needs no profile or doctor. With `--raw`, save the generated v5 payload to a file, inspect its exact time window and predicates, then select the user-intended profile and run doctor before `query preview --file ... --explain` and `query run --file ...`. Reuse the same file across preview and execution. Local construction does not validate server-side filter syntax or compatibility, and supplied filter values may be sensitive.
 
 For saved or hand-written payloads, run `query validate --file <path|->` offline first. It checks JSON/top-level structure with the same rules as preview/run; it does not validate SQL, filters, or server capabilities. `--raw` emits a reusable payload with a missing `schemaVersion` filled as `v1`. Save to a different file, never redirect over the input, then reuse that reviewed file for server preview/run.
+
+For counts, percentiles, grouped results or trends, add `--aggregation` to `query build` rather than inventing a JSON payload. All functions except `count`/`rate` require `--aggregate-on`; repeated `--group-by` sets grouping and `--step` selects a time series in seconds. `--limit` caps groups. These flags require an explicit aggregation; do not combine it with `--offset` or `--search`. Use `--filter`, confirm the field's units (for example trace `duration_nano`), and keep the generated time window fixed through review and execution.
 
 ## Doctor version checks
 

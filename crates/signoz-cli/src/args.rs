@@ -1083,6 +1083,18 @@ pub enum QueryCommand {
         /// Filter with a query expression.
         #[arg(long)]
         filter: Option<String>,
+        /// Build an aggregation instead of raw records.
+        #[arg(long, value_enum, conflicts_with_all = ["search", "offset"])]
+        aggregation: Option<AggregateFunction>,
+        /// Aggregate this field.
+        #[arg(long, requires = "aggregation")]
+        aggregate_on: Option<String>,
+        /// Group results by this field.
+        #[arg(long, requires = "aggregation")]
+        group_by: Vec<String>,
+        /// Set the time interval in seconds.
+        #[arg(long, requires = "aggregation", value_parser = clap::value_parser!(u32).range(1..=2_592_000))]
+        step: Option<u32>,
         #[command(flatten)]
         time: TimeArgs,
         #[command(flatten)]
