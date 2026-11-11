@@ -1,6 +1,7 @@
 {
   "name": "@cognelis/signoz-cli",
-  "version": "0.6.5",
+  "version": "0.7.0",
+  "author": {"name": "dnvyrn", "email": "dnvyrn@gamil.com"},
   "description": "Read-only SigNoz queries, diagnostics, profiles, and shell completion for terminals and coding agents.",
   "homepage": "https://github.com/cognelis/signoz-cli#readme",
   "repository": {
@@ -9,6 +10,7 @@
     "directory": "build/npm"
   },
   "bugs": {"url": "https://github.com/cognelis/signoz-cli/issues"},
+  "contributors": [{"name": "dnvyrn", "email": "dnvyrn@gamil.com"}, {"name": "Codex", "url": "https://openai.com/codex/"}, {"name": "Claude", "url": "https://claude.ai/"}],
   "license": "Apache-2.0",
   "keywords": ["signoz", "observability", "cli", "logs", "metrics", "traces"],
   "bin": {"signoz-cli": "bin/signoz-cli.js"},

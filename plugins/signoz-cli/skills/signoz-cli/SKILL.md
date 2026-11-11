@@ -1,9 +1,25 @@
 ---
+version: 0.7.0
 name: signoz-cli
 description: Query SigNoz observability data with the signoz-cli executable - logs, traces, metrics, services, exceptions, alerts, rules, dashboards, and infrastructure across named profiles such as test and prod. Use it for SigNoz investigations and whenever the user asks for the CLI, a shell command, CI, or JSON output; when the SigNoz MCP server is configured, prefer its tools.
 ---
 
 # SigNoz CLI
+
+## Doctor version checks
+
+When invoking `doctor`, set `SIGNOZ_CLI_SKILL` to the `version` in this loaded
+file's frontmatter. Do not infer it from the installed CLI's version: the agent
+may still have an older Skill in context. Without this handshake, doctor can
+inspect installed files but cannot know which Skill the agent loaded.
+
+`signoz-cli doctor` also checks the latest stable GitHub release (at most five
+seconds, or the command timeout if shorter). Use `doctor --no-update-check`
+for offline work. The appended `package` and `skill` rows are informational:
+update availability, missing or outdated Skills, and lookup failures do not
+change connection health or the exit code. Upgrade the CLI first if needed,
+run `signoz-cli skills install`, then reload the agent context.
+
 
 Use the `signoz-cli` binary for repeatable read-only SigNoz operations in terminals and automation. Keep credentials out of arguments, logs, generated files, and shell tracing.
 

@@ -63,8 +63,12 @@ pub enum Command {
     Init,
     /// Check connection and credentials.
     ///
-    /// Diagnose local configuration, credentials, connectivity, and authentication.
-    Doctor,
+    /// Diagnose connectivity, authentication, package updates, and companion Skill versions.
+    Doctor {
+        /// Skip the release update lookup.
+        #[arg(long)]
+        no_update_check: bool,
+    },
     /// View local configuration.
     ///
     /// Inspect the local configuration without exposing credentials.

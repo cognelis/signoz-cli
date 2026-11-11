@@ -235,6 +235,13 @@ impl Agent {
     }
 }
 
+pub(crate) fn bundled_skills() -> Vec<(&'static str, &'static str)> {
+    vec![(
+        "signoz-cli",
+        std::str::from_utf8(SKILL).expect("bundled Skill is UTF-8"),
+    )]
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::Path};

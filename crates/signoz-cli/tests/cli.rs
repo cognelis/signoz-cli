@@ -335,7 +335,14 @@ async fn doctor_reports_ordered_healthy_checks_without_exposing_identity_secrets
 
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "doctor",
+            "--no-update-check",
+        ])
         .env("SIGNOZ_API_KEY", "never-print-this")
         .output()
         .unwrap();
@@ -364,10 +371,14 @@ async fn doctor_reports_ordered_healthy_checks_without_exposing_identity_secrets
             "configuration",
             "credentials",
             "api",
-            "authentication"
+            "authentication",
+            "package",
+            "skill"
         ]
     );
-    assert!(checks.iter().all(|check| check["status"] == "pass"));
+    assert!(checks[..5].iter().all(|check| check["status"] == "pass"));
+    assert_eq!(checks[5]["status"], "skipped");
+    assert_eq!(checks[6]["name"], "skill");
     assert_eq!(envelope["meta"]["status"], 200);
 }
 
@@ -376,7 +387,7 @@ fn doctor_reports_missing_connection_on_stdout_and_exits_with_config_code() {
     let directory = tempfile::tempdir().unwrap();
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--output", "json", "doctor"])
+        .args(["--output", "json", "doctor", "--no-update-check"])
         .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
         .env_remove("SIGNOZ_URL")
         .env_remove("SIGNOZ_API_KEY")
@@ -400,7 +411,13 @@ fn doctor_verbose_keeps_the_report_on_stdout_and_adds_requested_diagnostics() {
     let directory = tempfile::tempdir().unwrap();
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--verbose", "--output", "json", "doctor"])
+        .args([
+            "--verbose",
+            "--output",
+            "json",
+            "doctor",
+            "--no-update-check",
+        ])
         .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
         .env_remove("SIGNOZ_URL")
         .env_remove("SIGNOZ_API_KEY")
@@ -424,6 +441,7 @@ fn doctor_distinguishes_missing_credentials_from_valid_configuration() {
             "--output",
             "json",
             "doctor",
+            "--no-update-check",
         ])
         .env("SIGNOZ_CONFIG", directory.path().join("config.toml"))
         .env_remove("SIGNOZ_URL")
@@ -447,7 +465,7 @@ fn doctor_does_not_echo_invalid_configuration_contents() {
     std::fs::write(&config, "never-echo-this = [").unwrap();
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--output", "json", "doctor"])
+        .args(["--output", "json", "doctor", "--no-update-check"])
         .env("SIGNOZ_CONFIG", config)
         .env_remove("SIGNOZ_URL")
         .env_remove("SIGNOZ_API_KEY")
@@ -474,7 +492,14 @@ async fn doctor_reports_reachable_but_unauthorized_without_leaking_the_key() {
         .await;
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "doctor",
+            "--no-update-check",
+        ])
         .env("SIGNOZ_API_KEY", "echoed-secret")
         .output()
         .unwrap();
@@ -500,7 +525,14 @@ async fn doctor_reports_upstream_failure_and_skips_authentication() {
         .await;
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "doctor",
+            "--no-update-check",
+        ])
         .env("SIGNOZ_API_KEY", "test-secret")
         .output()
         .unwrap();
@@ -524,7 +556,14 @@ async fn doctor_reports_malformed_identity_as_incompatible_authentication() {
         .await;
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "doctor",
+            "--no-update-check",
+        ])
         .env("SIGNOZ_API_KEY", "test-secret")
         .output()
         .unwrap();
@@ -550,7 +589,14 @@ async fn doctor_rejects_an_identity_without_a_non_empty_id() {
         .await;
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "doctor",
+            "--no-update-check",
+        ])
         .env("SIGNOZ_API_KEY", "test-secret")
         .output()
         .unwrap();
@@ -574,7 +620,14 @@ async fn doctor_treats_non_json_success_as_reachable_but_incompatible_authentica
         .await;
     let output = Command::cargo_bin("signoz-cli")
         .unwrap()
-        .args(["--url", &server.uri(), "--output", "json", "doctor"])
+        .args([
+            "--url",
+            &server.uri(),
+            "--output",
+            "json",
+            "doctor",
+            "--no-update-check",
+        ])
         .env("SIGNOZ_API_KEY", "test-secret")
         .output()
         .unwrap();

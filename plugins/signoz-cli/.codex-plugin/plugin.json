@@ -1,9 +1,10 @@
 {
   "name": "signoz-cli",
-  "version": "0.6.5",
+  "version": "0.7.0",
   "description": "Use the Rust SigNoz CLI safely in shell, CI, and JSON automation workflows.",
   "author": {
-    "name": "signoz-cli contributors"
+    "name": "dnvyrn",
+    "email": "dnvyrn@gamil.com"
   },
   "homepage": "https://github.com/cognelis/signoz-cli",
   "repository": "https://github.com/cognelis/signoz-cli",
@@ -19,7 +20,7 @@
     "displayName": "SigNoz CLI",
     "shortDescription": "Safe SigNoz CLI workflows for shell and CI.",
     "longDescription": "Guides Codex to use the Rust signoz-cli binary with stable JSON, secret-safe authentication, validated time windows, and supported read-only commands.",
-    "developerName": "signoz-cli contributors",
+    "developerName": "dnvyrn",
     "category": "Developer Tools",
     "capabilities": [
       "Read"

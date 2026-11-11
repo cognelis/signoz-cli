@@ -313,3 +313,31 @@ In Claude Code, use `/plugin marketplace add SigNoz/agent-skills` followed by `/
 - Telemetry can contain secrets or personal data. Review logs and traces before storing them as CI artifacts.
 
 The route map and behavior were derived from current first-party SigNoz documentation, OpenAPI, frontend code, MCP server, and Agent Skills. See the [TUI and API coverage research](docs/research/2026-07-23-tui-and-signoz-api-coverage.md), the main [integration design](docs/superpowers/specs/2026-07-22-signoz-rust-cli-agent-integration-design.md), and the [`doctor` design](docs/superpowers/specs/2026-07-22-signoz-cli-doctor-design.md).
+
+### Doctor version checks
+
+Doctor appends `package` and `skill` checks without changing the existing report
+layout, connection health, or exit codes. The package check compares the running
+CLI with the latest stable `cognelis/signoz-cli` GitHub release, with a five-second
+limit (or the command timeout if shorter). `doctor --no-update-check` skips
+that request; offline, malformed, oversized, or unavailable release responses
+are reported as skipped. No service credentials are sent to the release API.
+
+The Skill check compares the bundled version with installed Codex/Agents and
+Claude copies in global and current-project skill directories, honoring
+`CLAUDE_CONFIG_DIR`. `SIGNOZ_CLI_SKILL` carries the version actually loaded
+by the agent; without it, installed files do not prove the agent loaded them.
+Messages distinguish current, outdated, unknown, not installed, installed but
+not loaded, and reload-required states. Refresh with `signoz-cli skills install`
+and reload the agent context after upgrading. Legacy Skills without a version
+are reported as unknown; reinstall them to establish version alignment.
+
+`SIGNOZ_CLI_RELEASE_API` can select a trusted GitHub-compatible release
+metadata mirror (JSON with `tag_name`). It is independent of service profiles.
+
+## Contributors
+
+Maintained by **dnvyrn** (`dnvyrn@gamil.com`), with Codex and Claude available as AI collaborators. Actual participation is recorded per commit. See [Contributors](https://github.com/cognelis/signoz-cli/blob/main/CONTRIBUTORS.md) and the [commit policy](https://github.com/cognelis/signoz-cli/blob/main/docs/commit-conventions.md).
+
+For the informational `package` and `skill` rows, `pass` means the inspection
+completed; the message states whether an update or reload is needed.

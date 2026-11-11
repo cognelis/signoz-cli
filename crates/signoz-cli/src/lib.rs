@@ -6,3 +6,5 @@ pub mod doctor;
 pub mod onboarding;
 pub mod output;
 pub mod skill_install;
+
+mod maintenance;

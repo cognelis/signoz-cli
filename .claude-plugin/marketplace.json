@@ -1,7 +1,8 @@
 {
   "name": "signoz-cli",
   "owner": {
-    "name": "signoz-cli contributors"
+    "name": "dnvyrn",
+    "email": "dnvyrn@gamil.com"
   },
   "metadata": {
     "description": "Rust SigNoz CLI skills for Claude Code",

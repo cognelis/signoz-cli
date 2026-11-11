@@ -210,7 +210,17 @@ fn credential_store_choice_keeps_api_keys_where_configured() {
     );
 
     // doctor names the store the API key came from, even when the server is unreachable.
-    let output = run(&["--timeout", "1", "--profile", "prod", "doctor"], None);
+    let output = run(
+        &[
+            "--timeout",
+            "1",
+            "--profile",
+            "prod",
+            "doctor",
+            "--no-update-check",
+        ],
+        None,
+    );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     let check = report["data"]
         .as_array()

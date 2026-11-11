@@ -104,8 +104,18 @@ pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
             failure_code: None,
         });
     }
-    if matches!(&cli.command, Command::Doctor) {
-        return Ok(run_doctor(cli).await);
+    if let Command::Doctor { no_update_check } = &cli.command {
+        let mut result = run_doctor(cli).await;
+        if let Some(checks) = result.data.as_array_mut() {
+            checks.extend(
+                crate::maintenance::checks(
+                    *no_update_check,
+                    Duration::from_secs(cli.timeout.max(1)),
+                )
+                .await,
+            );
+        }
+        return Ok(result);
     }
     if let Command::Config {
         command: ConfigCommand::Path,
@@ -569,7 +579,7 @@ fn prepare(
             unreachable!("completion is dispatched before command preparation")
         }
         Command::Init => unreachable!("init is dispatched before command preparation"),
-        Command::Doctor => unreachable!("doctor is dispatched before command preparation"),
+        Command::Doctor { .. } => unreachable!("doctor is dispatched before command preparation"),
         Command::Config { command } => match command {
             ConfigCommand::Path => local(
                 "config.path",
