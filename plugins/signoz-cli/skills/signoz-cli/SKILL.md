@@ -1,5 +1,5 @@
 ---
-version: 0.8.0
+version: 0.9.0
 name: signoz-cli
 description: Query SigNoz observability data with the signoz-cli executable - logs, traces, metrics, services, exceptions, alerts, rules, dashboards, and infrastructure across named profiles such as test and prod. Use it for SigNoz investigations and whenever the user asks for the CLI, a shell command, CI, or JSON output; when the SigNoz MCP server is configured, prefer its tools.
 ---

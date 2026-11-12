@@ -6,65 +6,40 @@ baselines, not evidence of a published release.
 
 ## [Unreleased]
 
-### Added
-
-- `query retime --file <path|->` replaces a saved query's top-level start/end
-  using explicit `--since` or `--start`/`--end` options, preserving its query
-  specifications, variables and intervals. It runs offline and supports atomic
-  `--out` saving; invalid input/time leaves the destination untouched.
-
-- Time-window commands support `--since DURATION --end TIMESTAMP` for a
-  reproducible historical lookback. `--since` still conflicts with `--start`;
-  `--end` alone remains invalid. Cost Meter keeps only complete hours inside
-  explicitly anchored windows, as it does for absolute start/end ranges.
-
-- `query build` and `query validate` accept `--out PATH` to atomically save
-  the raw payload while retaining normal stdout output. Validation completes before
-  replacement, so validate can safely normalize an input file in place. Unix output
-  files are owner-only; symlink destinations are replaced without following them.
-
-- `query build` now supports `--aggregation`, `--aggregate-on`, repeated
-  `--group-by`, and `--step` for offline scalar, grouped, and time-series log/trace
-  requests. It reuses execution builders and validation; aggregation refuses
-  raw-only `--search`/`--offset`, and dependent flags require `--aggregation`.
-
-- `query validate --file <path|->` checks Query Builder v5 structure offline,
-  using the same validation as preview/run, and prints the normalized payload.
-  Missing `schemaVersion` becomes `v1`; input files are never rewritten.
-
-- `query build --signal logs|traces` builds a local Query Builder v5 search
-  payload using the same builders as execution. Time windows are resolved once;
-  `--raw` output can be saved and passed to `query preview` or `query run`.
-  No connection configuration, credentials, or network access is needed.
-
-
-## [0.8.0] - 2026-11-11
+## [0.9.0] - 2026-11-12
 
 ### Added
 
-- `skills status [--target all|codex|claude]` performs an offline, read-only
-  inspection of managed Skill installations. It reports installed/bundled
-  versions and changed, missing, or unreadable files, including same-version
-  edits and missing references, without modifying user files.
-- The core Skill routes local maintenance directly to offline commands and
-  reserves profile/doctor preflight for data workflows. It describes the
-  inspect, review, refresh, verify, and context-reload sequence.
-
-## [0.7.2] - 2026-11-11
-
-### Fixed
-
-- Views and channels lists reject non-array `data` as an incompatible response
-  (exit 7), instead of silently replacing it with an empty list and reporting
-  zero items. Missing, null, and empty-array legacy responses remain supported.
-
-## [0.7.1] - 2026-11-11
+- `skills status [--target all|codex|claude]` inspects installed Skill files offline,
+  reporting missing, changed and unreadable files, including same-version drift.
+- `query build --signal logs|traces` constructs raw searches, grouped aggregations
+  and time series offline with the same builders and validation as execution.
+- `query validate --file <path|->` checks Query Builder v5 structure locally.
+  `query build` and `query validate` support atomic `--out` saving; validation
+  completes before replacement, including when input and output share a path.
+- `--since DURATION --end TIMESTAMP` anchors a historical lookback. Cost Meter
+  keeps only complete hourly buckets inside explicitly anchored ranges.
+- `query retime --file <path|->` reuses a saved query with an explicit new time
+  window, preserving its filters, aggregations, groupings, variables and intervals.
+  It supports stdin and atomic `--out` saving.
 
 ### Fixed
 
-- Offset-paginated responses no longer advertise a `nextOffset` that repeats the
-  current page after an empty response or integer overflow. `hasMore` is preserved
-  and a warning asks callers to narrow the time window or filter.
+- Offset pagination no longer advertises repeated or overflowed continuation
+  offsets. Partial-result warnings explain when callers must narrow the query.
+- Views and channels reject incompatible list shapes instead of reporting false
+  empty results; supported missing/null/empty legacy responses remain accepted.
+
+### Changed
+
+- Skills distinguish offline composition and installation checks from remote
+  execution, and document environment selection, review, pagination completeness,
+  fixed-window reuse and installation refresh checks.
+- Saved query files use private Unix permissions (0600); destination symlinks are
+  replaced rather than followed. Pass the actual target path to update a linked file.
+  `retime` changes only top-level start/end (plus normal schemaVersion normalization),
+  not nested timestamps, SQL literals or variables. Local checks do not establish
+  server compatibility or authorization. The JSON envelope version remains unchanged.
 
 ## [0.7.0] - 2026-11-11
 

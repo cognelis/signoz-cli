@@ -193,3 +193,9 @@ Skill 增加任务分流：本地维护直接使用离线命令，数据任务�
 验收：171 项 Rust、9 项 Node、13 项 Python 测试、fmt/clippy、Agent 集成、版本及 npm tarball 检查通过。模拟服务验证调整后的完整 payload 原样提交，覆盖变量/规格保留、stdin、输入不变、无效参数不覆盖目标。
 
 新增行为用例先在原实现确认失败，再完成实现和全量验证。保持 Unreleased，不递增版本、不推送发布、不刷新全局安装或插件。未验证生产服务、其他平台或模型级 Skill 效果。
+
+## 发布批次 0.9.0（2026-11-12）
+
+合并上次公开版本之后的暂存版本章节及 Unreleased，按当前开发版本递增一次 minor；已发布版本的 changelog 原文保持不变。产品、包、插件及 Skill 版本同步，JSON envelope 版本不变。
+
+发布前验收：171 项 Rust、9 项 Node、13 项 Python 测试，fmt/clippy、Agent 集成、版本及 npm tarball 安装检查通过。 跨平台原生构建和公开资产校验由 release workflow 完成后才进入 npm 发布；未用生产业务服务或模型级 Skill 评测替代回归测试。

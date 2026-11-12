@@ -368,7 +368,7 @@ again afterward, then reload the agent context. File alignment does not prove
 that the running agent loaded the new Skill. Doctor remains the connection and
 version overview; this command provides per-file installation detail.
 
-## Unreleased: draft and review log/trace queries
+## draft and review log/trace queries
 
 Build a fixed query payload locally, before selecting a connection:
 
