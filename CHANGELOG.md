@@ -8,6 +8,11 @@ baselines, not evidence of a published release.
 
 ### Added
 
+- `query retime --file <path|->` replaces a saved query's top-level start/end
+  using explicit `--since` or `--start`/`--end` options, preserving its query
+  specifications, variables and intervals. It runs offline and supports atomic
+  `--out` saving; invalid input/time leaves the destination untouched.
+
 - Time-window commands support `--since DURATION --end TIMESTAMP` for a
   reproducible historical lookback. `--since` still conflicts with `--start`;
   `--end` alone remains invalid. Cost Meter keeps only complete hours inside

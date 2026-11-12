@@ -89,6 +89,21 @@ enum Prepared {
 
 pub async fn run(cli: &Cli) -> Result<DispatchResult, AppError> {
     if let Command::Query {
+        command: QueryCommand::Retime { file, time, out },
+    } = &cli.command
+    {
+        let mut body = read_query_body(file)?;
+        let window = window(time, Utc::now())?;
+        body["start"] = json!(window.start_ms);
+        body["end"] = json!(window.end_ms);
+        save_query(out.as_deref(), &body)?;
+        return Ok(DispatchResult {
+            command: "query.retime".into(), data: body,
+            meta: Meta { warnings: vec!["changed top-level start/end only; nested times, intervals and server compatibility are not checked; review before query preview or execution".into()], ..Meta::default() },
+            failure_code: None,
+        });
+    }
+    if let Command::Query {
         command: QueryCommand::Validate { file, out },
     } = &cli.command
     {
@@ -1227,7 +1242,9 @@ fn prepare(
             Operation::channel_get,
         ),
         Command::Query { command } => match command {
-            QueryCommand::Build { .. } | QueryCommand::Validate { .. } => {
+            QueryCommand::Build { .. }
+            | QueryCommand::Validate { .. }
+            | QueryCommand::Retime { .. } => {
                 unreachable!("local query commands are handled before connection preparation")
             }
             QueryCommand::Run { file } => {

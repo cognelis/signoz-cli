@@ -69,6 +69,10 @@ async function main() {
     const aggregate = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'build', '--signal', 'logs', '--aggregation', 'count', '--group-by', 'service.name', '--step', '60', '--start', '@1000', '--end', '@121000'], {env: cliEnv}));
     assert.equal(aggregate.requestType, 'time_series');
     assert.equal(aggregate.compositeQuery.queries[0].spec.aggregations[0].expression, 'count()');
+    const retimed = JSON.parse(run(process.execPath, [launcher, '--raw', 'query', 'retime', '--file', queryFile, '--since', '1m', '--end', '@120000'], {env: cliEnv}));
+    assert.equal(retimed.start, 60000);
+    assert.equal(retimed.end, 120000);
+    assert.deepEqual(retimed.compositeQuery, built.data.compositeQuery);
     const invalid = spawnSync(process.execPath, [launcher, '--output', 'json', 'logs', 'search', '--since', '0h'], {encoding: 'utf8', env: cliEnv});
     assert.equal(invalid.status, 2);
     assert.equal(invalid.stdout, '');

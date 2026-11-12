@@ -23,6 +23,8 @@ For saved or hand-written payloads, run `query validate --file <path|->` offline
 
 For counts, percentiles, grouped results or trends, add `--aggregation` to `query build` rather than inventing a JSON payload. All functions except `count`/`rate` require `--aggregate-on`; repeated `--group-by` sets grouping and `--step` selects a time series in seconds. `--limit` caps groups. These flags require an explicit aggregation; do not combine it with `--offset` or `--search`. Use `--filter`, confirm the field's units (for example trace `duration_nano`), and keep the generated time window fixed through review and execution.
 
+To compare the same saved query across windows, use `query retime --file saved.json` with an explicit `--since` or `--start`/`--end` and save to a separate `--out` file. Only top-level start/end change (plus normal schemaVersion normalization); nested timestamps, variables, SQL literals and step intervals remain unchanged and need review.
+
 For incident replay, use `--since <duration> --end <RFC3339|@unix-ms>` so the same command keeps the same window. Do not add `--start` to that pair or use `--end` alone. Cost Meter clips anchored ranges to complete hourly buckets inside them; other command-specific window limits still apply. Use resolved `meta.start`/`meta.end` for subsequent pages when provided.
 
 ## Doctor version checks
@@ -182,7 +184,7 @@ signoz-cli dashboards list|get
 signoz-cli views list --source-page traces|logs|metrics|meter
 signoz-cli views get <id>
 signoz-cli channels list|get
-signoz-cli query validate|run|preview --file <path|->
+signoz-cli query validate|retime|run|preview --file <path|->
 ```
 
 `logs search` is the log lookup command; there is no `logs query` command. Quote filter expressions so the shell does not interpret them. Combine free text with `--search` and structured predicates with `--filter`.

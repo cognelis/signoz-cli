@@ -1118,6 +1118,18 @@ pub enum QueryCommand {
         #[arg(long, value_hint = clap::ValueHint::FilePath)]
         out: Option<PathBuf>,
     },
+    /// Change a saved query's time window locally.
+    #[command(group(clap::ArgGroup::new("new_window").required(true).args(["since", "start"])))]
+    Retime {
+        /// Read query JSON from a file or stdin (-).
+        #[arg(long, default_value = "-", value_hint = clap::ValueHint::FilePath)]
+        file: PathBuf,
+        #[command(flatten)]
+        time: TimeArgs,
+        /// Save the updated query atomically.
+        #[arg(long, value_hint = clap::ValueHint::FilePath)]
+        out: Option<PathBuf>,
+    },
     /// Run a query payload.
     Run {
         /// Read query JSON from a file or stdin (-).

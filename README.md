@@ -239,7 +239,7 @@ rules list|get|history|history-stats|history-status|history-contributors
 dashboards list|get
 views list|get
 channels list|get
-query build|validate|run|preview
+query build|validate|retime|run|preview
 ```
 
 The client retries replay-safe requests on transport failures (including interrupted response bodies), HTTP 429, 502, 503, and 504, for at most three attempts within the original timeout. Oversized responses and complete responses containing invalid JSON are not retried. Responses are capped at 64 MiB. Feature-specific 404 responses report an unsupported server capability instead of pretending that a resource is missing. Public v2/v5 routes are used for dashboards, metrics, Query Builder, rule history, and infrastructure; services, dependency maps, exceptions, and Explorer views are explicitly maintained as first-party UI/MCP compatibility adapters because SigNoz has not published equivalent stable read contracts for those views.
@@ -458,3 +458,21 @@ pair works on commands using the shared time-window options. `--since` without
 checks apply normally. Cost Meter narrows an anchored window to complete hourly
 buckets inside it and rejects windows containing none. For pagination, reuse
 resolved `meta.start`/`meta.end` when available.
+
+### Reuse a saved query with another time window
+
+```sh
+signoz-cli query retime --file incident.json --since 30m --end '2026-11-12T10:00:00+08:00' --out comparison.json
+signoz-cli --raw query retime --file incident.json --start '@1000' --end '@61000'
+```
+
+`query retime` requires an explicit new window: `--since` (optionally with `--end`)
+or `--start` plus `--end`. Input must already be a structurally valid Query Builder
+v5 payload. The usual missing-schemaVersion normalization applies; otherwise only
+top-level `start` and `end` change. Filters, aggregations, groupings, variables and
+step intervals are preserved. Relative windows end at now unless anchored.
+
+This is local; stdin (`--file -`) and atomic `--out` saving work as with validate.
+Use a separate output file for before/after comparison. Review the result before
+server preview/run: nested timestamps, SQL literals, variables and interval/window
+compatibility are not rewritten or validated against the service.

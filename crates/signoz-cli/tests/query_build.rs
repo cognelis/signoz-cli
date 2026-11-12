@@ -414,3 +414,134 @@ fn lookback_with_end_builds_a_reproducible_historical_query() {
         .code(2)
         .stdout("");
 }
+
+#[tokio::test]
+async fn retimes_a_saved_query_without_changing_its_specification() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("broken.toml");
+    std::fs::write(&config, "bad = [").unwrap();
+    let original = builder(&config)
+        .args([
+            "--signal",
+            "traces",
+            "--aggregation",
+            "p99",
+            "--aggregate-on",
+            "duration_nano",
+            "--group-by",
+            "service.name",
+            "--step",
+            "60",
+            "--start",
+            "@1000",
+            "--end",
+            "@61000",
+        ])
+        .output()
+        .unwrap();
+    assert!(original.status.success());
+    let mut body: Value = serde_json::from_slice(&original.stdout).unwrap();
+    body["variables"] = json!({"custom":"preserved"});
+    let input = root.path().join("original.json");
+    let output = root.path().join("retimed.json");
+    std::fs::write(&input, body.to_string()).unwrap();
+    let result = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args(["--raw", "query", "retime", "--file"])
+        .arg(&input)
+        .args(["--since", "1m", "--end", "@121000", "--out"])
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let mut expected = body.clone();
+    expected["start"] = json!(61000);
+    expected["end"] = json!(121000);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&result.stdout).unwrap(),
+        expected
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&input).unwrap()).unwrap(),
+        body
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&std::fs::read_to_string(&output).unwrap()).unwrap(),
+        expected
+    );
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v5/query_range"))
+        .and(body_json(expected))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":{}})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", root.path().join("empty.toml"))
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .args(["--url", &server.uri(), "query", "run", "--file"])
+        .arg(&output)
+        .assert()
+        .success();
+    for args in [
+        vec![],
+        vec!["--end", "@2000"],
+        vec!["--since", "0h"],
+        vec!["--start", "@3", "--end", "@1"],
+    ] {
+        Command::cargo_bin("signoz-cli")
+            .unwrap()
+            .env("SIGNOZ_CONFIG", &config)
+            .args(["query", "retime", "--file"])
+            .arg(&input)
+            .arg("--out")
+            .arg(&output)
+            .args(args)
+            .assert()
+            .code(2)
+            .stdout("");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&std::fs::read(&output).unwrap()).unwrap()["end"],
+            121000
+        );
+    }
+    let from_stdin = Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args([
+            "--raw", "query", "retime", "--start", "@2000", "--end", "@62000",
+        ])
+        .write_stdin(body.to_string())
+        .output()
+        .unwrap();
+    assert!(from_stdin.status.success());
+    let mut expected_stdin = body.clone();
+    expected_stdin["start"] = json!(2000);
+    expected_stdin["end"] = json!(62000);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&from_stdin.stdout).unwrap(),
+        expected_stdin
+    );
+    std::fs::write(&input, "invalid JSON").unwrap();
+    Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .args(["query", "retime", "--file"])
+        .arg(&input)
+        .args(["--since", "1h", "--out"])
+        .arg(&output)
+        .assert()
+        .code(2)
+        .stdout("");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&output).unwrap()).unwrap()["end"],
+        121000
+    );
+}
