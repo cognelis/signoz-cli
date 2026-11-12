@@ -40,11 +40,14 @@ impl TimeWindowArgs {
 
     pub fn resolve(&self, now: DateTime<Utc>) -> Result<TimeWindow, String> {
         if let Some(since) = &self.since {
-            if self.start.is_some() || self.end.is_some() {
-                return Err("--since conflicts with --start and --end".into());
+            if self.start.is_some() {
+                return Err("--since conflicts with --start".into());
             }
             let duration = parse_duration_ms(since)?;
-            let end_ms = now.timestamp_millis();
+            let end_ms = match self.end.as_deref() {
+                Some(end) => parse_timestamp_ms(end)?,
+                None => now.timestamp_millis(),
+            };
             let start_ms = end_ms
                 .checked_sub(duration)
                 .ok_or_else(|| "relative time range is out of bounds".to_owned())?;
@@ -103,6 +106,41 @@ fn parse_timestamp_ms(value: &str) -> Result<i64, String> {
 mod tests {
     use super::TimeWindowArgs;
     use chrono::DateTime;
+
+    #[test]
+    fn anchors_lookback_to_an_explicit_end_instead_of_now() {
+        let args = TimeWindowArgs::from_parts(Some("30m"), None, Some("2026-11-12T09:00:00+08:00"));
+        let first = args
+            .resolve(DateTime::from_timestamp_millis(0).unwrap())
+            .unwrap();
+        let later = args
+            .resolve(DateTime::from_timestamp_millis(1_000_000).unwrap())
+            .unwrap();
+        assert_eq!(first, later);
+        assert_eq!(
+            first.end_ms,
+            DateTime::parse_from_rfc3339("2026-11-12T01:00:00Z")
+                .unwrap()
+                .timestamp_millis()
+        );
+        assert_eq!(first.end_ms - first.start_ms, 1_800_000);
+        let now = DateTime::from_timestamp_millis(0).unwrap();
+        assert!(
+            TimeWindowArgs::from_parts(Some("1ms"), None, Some("@-9223372036854775808"))
+                .resolve(now)
+                .is_err()
+        );
+        assert!(
+            TimeWindowArgs::from_parts(Some("1m"), Some("@1"), Some("@2"))
+                .resolve(now)
+                .is_err()
+        );
+        assert!(
+            TimeWindowArgs::from_parts(Some("1m"), None, Some("bad"))
+                .resolve(now)
+                .is_err()
+        );
+    }
 
     #[test]
     fn resolves_relative_and_absolute_windows() {

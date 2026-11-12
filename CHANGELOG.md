@@ -8,6 +8,11 @@ baselines, not evidence of a published release.
 
 ### Added
 
+- Time-window commands support `--since DURATION --end TIMESTAMP` for a
+  reproducible historical lookback. `--since` still conflicts with `--start`;
+  `--end` alone remains invalid. Cost Meter keeps only complete hours inside
+  explicitly anchored windows, as it does for absolute start/end ranges.
+
 - `query build` and `query validate` accept `--out PATH` to atomically save
   the raw payload while retaining normal stdout output. Validation completes before
   replacement, so validate can safely normalize an input file in place. Unix output

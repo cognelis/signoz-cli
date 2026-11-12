@@ -189,7 +189,7 @@ signoz-cli --output json query run --file request.json
 printf '%s' "$QUERY_JSON" | signoz-cli --output json query run --file -
 ```
 
-Use `--since` with `ms`, `s`, `m`, `h`, or `d`, or provide both `--start` and `--end` as RFC3339 timestamps or `@<unix-ms>`. The metric query command reads the metric catalog first and derives safe time/spatial aggregation from its type, temporality, and monotonicity; `--aggregation` only overrides the spatial aggregation. Metrics, log aggregates, and trace aggregates support filtering and grouping; aggregate `--step` switches scalar/grouped output to a time series. Raw searches and ordinary resource lists accept `--limit` and `--offset`; the JSON `meta` reports the resolved time window and pagination state. Alert-rule history uses `--cursor`/`meta.nextCursor` instead of offsets. The time-windowed metrics and field catalogs have a limit but no offset; narrow an incomplete response with their search/context/type/source/time filters. Run `signoz-cli --help` and `signoz-cli <group> <command> --help` for the exact command surface.
+Use `--since` with `ms`, `s`, `m`, `h`, or `d` (optionally anchored with `--end`), or provide both `--start` and `--end` as RFC3339 timestamps or `@<unix-ms>`. The metric query command reads the metric catalog first and derives safe time/spatial aggregation from its type, temporality, and monotonicity; `--aggregation` only overrides the spatial aggregation. Metrics, log aggregates, and trace aggregates support filtering and grouping; aggregate `--step` switches scalar/grouped output to a time series. Raw searches and ordinary resource lists accept `--limit` and `--offset`; the JSON `meta` reports the resolved time window and pagination state. Alert-rule history uses `--cursor`/`meta.nextCursor` instead of offsets. The time-windowed metrics and field catalogs have a limit but no offset; narrow an incomplete response with their search/context/type/source/time filters. Run `signoz-cli --help` and `signoz-cli <group> <command> --help` for the exact command surface.
 
 `metrics query --source meter` uses the meter source for both catalog metadata and the query. `metrics inspect` defaults to the last 30 minutes and rejects any time range longer than 30 minutes.
 
@@ -442,3 +442,19 @@ the destination unchanged. Parent directories must exist; Unix files are 0600.
 A destination symlink is replaced, not followed. The file can be passed directly
 to `query preview/run --file` after normal preflight; local validation is not
 server validation. Do not use shell redirection over the input file.
+
+### Reproduce a historical lookback
+
+```sh
+signoz-cli query build --signal logs --since 30m --end '2026-11-12T09:00:00+08:00' --out incident.json
+signoz-cli logs search --since 30m --end '2026-11-12T09:00:00+08:00' --output json
+```
+
+The window ends at the supplied RFC3339 or `@unix-ms` timestamp and starts one
+specified duration earlier; rerunning does not move it with the clock. The same
+pair works on commands using the shared time-window options. `--since` without
+`--end` still ends at now; `--start`/`--end` remains supported. Do not combine
+`--since` with `--start`, and do not provide `--end` alone. Duration and overflow
+checks apply normally. Cost Meter narrows an anchored window to complete hourly
+buckets inside it and rejects windows containing none. For pagination, reuse
+resolved `meta.start`/`meta.end` when available.

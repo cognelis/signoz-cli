@@ -110,7 +110,7 @@ async fn built_payload_can_be_reviewed_and_then_submitted_without_rebuilding_it(
         .and(path("/api/v5/query_range"))
         .and(body_json(body))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {}})))
-        .expect(1)
+        .expect(2)
         .mount(&server)
         .await;
     Command::cargo_bin("signoz-cli")
@@ -130,6 +130,24 @@ async fn built_payload_can_be_reviewed_and_then_submitted_without_rebuilding_it(
         .assert()
         .success()
         .stdout(predicate::str::contains("query.run"));
+    Command::cargo_bin("signoz-cli")
+        .unwrap()
+        .env("SIGNOZ_CONFIG", &config)
+        .env("SIGNOZ_API_KEY", "test-secret")
+        .args([
+            "--url",
+            &server.uri(),
+            "logs",
+            "search",
+            "--search",
+            "can't connect",
+            "--since",
+            "1s",
+            "--end",
+            "@2000",
+        ])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -364,4 +382,35 @@ fn saves_queries_atomically_and_can_validate_in_place() {
                 .is_symlink()
         );
     }
+}
+
+#[test]
+fn lookback_with_end_builds_a_reproducible_historical_query() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("broken.toml");
+    std::fs::write(&config, "bad = [").unwrap();
+    let result = builder(&config)
+        .args(["--signal", "logs", "--since", "1m", "--end", "@121000"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let body: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(body["start"], 61000);
+    assert_eq!(body["end"], 121000);
+    builder(&config)
+        .args(["--signal", "logs", "--end", "@121000"])
+        .assert()
+        .code(2)
+        .stdout("");
+    builder(&config)
+        .args([
+            "--signal", "logs", "--since", "1m", "--start", "@1", "--end", "@121000",
+        ])
+        .assert()
+        .code(2)
+        .stdout("");
 }

@@ -1322,7 +1322,7 @@ fn inspect_window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, App
 
 fn meter_window(args: &TimeArgs, now: DateTime<Utc>) -> Result<TimeWindow, AppError> {
     const HOUR_MS: i64 = 60 * 60 * 1_000;
-    let relative = args.start.is_none();
+    let relative = args.start.is_none() && args.end.is_none();
     let value = if args.since.is_none() && relative {
         signoz_client::TimeWindowArgs::since("7d")
     } else {
@@ -2167,6 +2167,38 @@ mod tests {
                 assert!(result.meta.warnings[0].contains("--profile prod auth login"));
             }
         }
+    }
+
+    #[test]
+    fn anchored_meter_lookback_keeps_only_hours_inside_the_requested_range() {
+        let args = TimeArgs {
+            since: Some("2h".into()),
+            start: None,
+            end: Some("@9000000".into()),
+        };
+        let window = meter_window(&args, Utc::now()).unwrap();
+        assert_eq!((window.start_ms, window.end_ms), (3_600_000, 7_200_000));
+        assert!(
+            meter_window(
+                &TimeArgs {
+                    since: Some("1h".into()),
+                    ..args
+                },
+                Utc::now()
+            )
+            .is_err()
+        );
+        assert!(
+            meter_window(
+                &TimeArgs {
+                    since: None,
+                    start: None,
+                    end: Some("@9000000".into())
+                },
+                Utc::now()
+            )
+            .is_err()
+        );
     }
 
     #[test]

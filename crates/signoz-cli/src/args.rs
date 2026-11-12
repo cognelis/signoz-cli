@@ -1140,13 +1140,17 @@ pub enum QueryCommand {
 #[derive(Clone, Debug, Args)]
 pub struct TimeArgs {
     /// Look back by a duration, such as 30m.
-    #[arg(long, conflicts_with_all = ["start", "end"])]
+    ///
+    /// Use --end to anchor the duration to a historical timestamp instead of now.
+    #[arg(long, conflicts_with = "start")]
     pub since: Option<String>,
     /// Set start time (RFC3339 or @unix-ms).
     #[arg(long, requires = "end")]
     pub start: Option<String>,
     /// Set end time (RFC3339 or @unix-ms).
-    #[arg(long, requires = "start")]
+    ///
+    /// Pair with --start or --since.
+    #[arg(long)]
     pub end: Option<String>,
 }
 
